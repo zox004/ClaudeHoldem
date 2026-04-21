@@ -5,9 +5,9 @@
 
 ## 현재 상태
 
-**Phase**: 1 (Regret Matching + Kuhn CFR) — 시작 대기
-**시작일**: 2026-04-21 (Phase 1 착수 시점 기준)
-**목표 완료일**: 2026-05-05 (시작 + 2주)
+**Phase**: 1 (Regret Matching + Kuhn CFR) — Week 1 착수
+**시작일**: 2026-04-21
+**목표 완료일**: 2026-05-05 (+ 2주)
 
 ## 다음 할 일 (Next Action) — Phase 1 Week 1
 
@@ -59,17 +59,34 @@ _없음._
 
 ### Phase 0 (환경 세팅)
 **완료일**: 2026-04-21
-**소요 시간**: 1일 (세션 1회)
-**달성한 것**:
-- uv 기반 Python 3.11 프로젝트 골격 완성
-- Claude Code 하네스(agents/skills/hooks) 배치
-- MPS + torch 2.11 동작 검증
-- W&B 연동 준비
-- git repo 초기 커밋
+**소요 시간**: 1일 (단일 세션, 약 1시간)
+**커밋**: `4247b16`, `a4652e0` — `origin/main`에 push 완료 (https://github.com/zox004/ClaudeHoldem, private)
+
+**달성한 것** (Exit Criteria):
+- [x] `uv run python -c "import torch; print(torch.backends.mps.is_available())"` → **True** (검증 재실행 확인)
+- [x] `uv run pytest` → **"no tests ran in 0.00s"**
+- [x] Claude Code가 `CLAUDE.md` 기반 프로젝트 요약 가능 (한국어 대화 + 최종 목표·Phase·원칙 3가지 산출)
+- [x] `.claude/agents/` 에 서브에이전트 3개 배치 — `cfr-reviewer.md`, `rl-debugger.md`, `test-writer.md`
+- [x] W&B 로그인 완료 (entity: `zox004`, 프로젝트 `poker-ai-hunl`은 첫 `wandb.init()`에서 자동 생성)
+
+**추가로 완료한 것** (ROADMAP Phase 0 할 일 리스트):
+- [x] uv 0.11.7 설치 (Homebrew)
+- [x] `uv init --bare --python 3.11 --name poker-ai`, Python 3.11.15 픽스
+- [x] 런타임 deps 설치 (numpy, torch 2.11, rlcard[torch], wandb, hydra-core) + dev deps (pytest, ruff, mypy strict)
+- [x] src layout (`src/poker_ai`) + hatchling build backend
+- [x] 프로젝트 디렉터리 생성 + 각 패키지 `__init__.py`
+- [x] `.gitignore` (checkpoints/, wandb/, .venv/, `.claude/settings.local.json` 등)
+- [x] `.claude/` 하네스(agents 3종 + poker-ai-dev skill + hooks.json + settings.json) 배치
+- [x] `scripts/check_mps.py` 작성·실행 (matmul + autograd backward OK)
+- [x] `git init` + 2개 커밋 + private 원격 저장소 push
+
 **배운 것**:
-- `uv init --bare`는 build-system을 생성하지 않으므로 src layout 쓰려면 수동으로 `[tool.hatch.build.targets.wheel]` 추가 필요
-- `uv add` 기본 동작은 `requires-python` 하한의 **최신** Python을 선택 → 3.11 픽스는 `uv python pin 3.11` 필요
-- `.claude/settings.local.json`은 per-machine이므로 .gitignore 필수
+- `uv init --bare`는 build-system 섹션을 생성하지 않는다 → src layout 쓰려면 `[build-system]` + `[tool.hatch.build.targets.wheel]`을 수동으로 추가해야 `from poker_ai...` import가 된다
+- `uv add`만으로는 Python 버전이 고정되지 않는다 (`requires-python` 하한의 **최신** Python을 선택, 이번에 3.14.4가 잡힘) → `uv python pin 3.11` + `uv sync`로 명시 고정 필요
+- `.claude/settings.local.json`은 per-machine permission 설정이므로 절대 커밋 금지 (`.gitignore`에 추가)
+- `uv run wandb login`은 Claude Code의 `!` 셸에서 TTY가 없어 대화형 프롬프트가 안 뜬다 → 키를 인자로 직접 전달 (`uv run wandb login <KEY>`) 또는 별도 터미널에서 수행
+- `gh` CLI가 2022년 버전(2.20.2)이라 `--json visibility` 같은 최근 필드가 없다. 기능 자체는 호환되지만 `brew upgrade gh` 권장
+
 **다음 Phase로 이월된 이슈**:
 - 없음
 
