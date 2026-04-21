@@ -5,24 +5,32 @@
 
 ## 현재 상태
 
-**Phase**: 1 (Regret Matching + Kuhn CFR) — **Week 1 완료, Week 2 진입 대기**
+**Phase**: 1 (Regret Matching + Kuhn CFR) — **Week 2 진행 중 (Day 1)**
 **시작일**: 2026-04-21
 **목표 완료일**: 2026-05-05 (+ 2주)
 
 ## 다음 할 일 (Next Action) — Phase 1 Week 2 (Kuhn Poker Vanilla CFR)
 
-> **다음 세션에서 `test-writer` 서브에이전트로 시작**. (Week 1에서 배치한 `.claude/agents/test-writer.md`는 세션 재시작 후 `/agents`에 등록됨.)
-
-- [ ] `tests/unit/test_kuhn.py` + `tests/regression/test_kuhn_convergence.py` FAILING 작성
-  - 게임 트리 합법성 (12 infoset, perfect recall)
+- [x] `tests/unit/test_kuhn.py` + `tests/regression/test_kuhn_perfect_recall.py` — 112 tests RED → GREEN
+  - 게임 트리 합법성 (12 infoset, perfect recall, terminal utility 5 histories × 6 deals) ✅
+  - Nash 수렴 regression test는 Vanilla CFR 구현 후 별도 파일로 추가 예정
+- [x] `src/poker_ai/games/kuhn.py` — 3장 덱, 12 infoset Kuhn Poker 엔진 (커밋 `d1f316c`)
+- [ ] `tests/regression/test_kuhn_convergence.py` FAILING 작성
   - Nash 수렴: 게임 가치 `-1/18 ± 0.001`, Jack bet ∈ `[0, 1/3]`, King bet ≈ 3·(Jack bet)
-- [ ] `src/poker_ai/games/kuhn.py` — 3장 덱, 12 infoset Kuhn Poker 엔진
 - [ ] `src/poker_ai/algorithms/vanilla_cfr.py` — 재귀적 CFR (Zinkevich 2007 수식 번호 주석 필수)
 - [ ] `src/poker_ai/eval/exploitability.py` — best response 기반 exploitability (mbb/g)
 - [ ] Exploitability가 10k iter 후 `< 0.01 mbb/g` 달성 확인
 - [ ] W&B에 exploitability convergence curve 로깅 (기존 Hydra harness 재사용, `experiments/phase1_kuhn_vanilla.py` + `experiments/conf/phase1_kuhn.yaml`)
 
 ## 지금까지 한 일 (Done)
+
+### Phase 1 Week 2 (진행 중, 2026-04-21 착수)
+- ✅ **Day 1**: Kuhn Poker 게임 엔진 구현 (커밋 `d1f316c`) — **112 tests GREEN (107 unit + 5 regression)**
+  - 설계 결정: chance node 추상화 없음(Kuhn 딜은 외부 루프), `KuhnAction(IntEnum)`, `@dataclass(frozen=True, slots=True)` 불변 state, `KuhnPoker`는 staticmethod factory
+  - **Char-based infoset key 규약 확정** (`"J"/"Q"/"K"`) — debug eyeball 가독성 > numpy 일관성
+  - **Static terminal utility table 패턴** 확립 — Phase 2 Leduc에서도 재활용 예정 (5개 if 체인, 동적 pot 계산 버그 회피)
+  - Perfect recall regression: 12 infosets × opponent 카드 privacy × own card/history 인코딩 검증
+  - `src/poker_ai/games/kuhn.py` 최상단 docstring에 Neller & Lanctot 2013 Section 4.1 scoring 표 + fold/showdown/utility 검산 규약 3줄 삽입
 
 ### Phase 1 Week 1 (완료 2026-04-21)
 - ✅ TDD 첫 사이클: RPS Regret Matching (커밋 `968ecc2`, `3732551`)
@@ -55,6 +63,15 @@
 ## 현재 고민 / 블로커
 
 _없음._
+
+## Known Issues (minor)
+
+> "무해하지만 의식해둘 것"들을 Phase 진행 중 여기에 누적. 각 항목은 현재 실패를 일으키지 않지만 나중에 다른 증상으로 drift할 수 있어 후속 Phase에서 재평가.
+
+- **Kuhn `KuhnState.current_player` returns `len(history) % 2` even for terminal states** (2026-04-21, Week 2 Day 1)
+  - CFR trainer must gate with `is_terminal` before calling. 현재 모든 호출지점이 그렇게 설계되어 문제 없음.
+  - 방어적 `raise`를 걸면 `TestNextStateClassificationConsistency`가 terminal state를 만들 때 깨지므로 보류.
+  - Consider adding explicit guard if Phase 3 debugging suggests needed.
 
 ## 이번 Phase(1)의 Exit Criteria
 
