@@ -11,14 +11,24 @@
 
 ## 다음 할 일 (Next Action) — Phase 1 Week 1
 
-- [ ] `test-writer` 에이전트로 `tests/unit/test_regret_matching.py` FAILING 테스트 먼저 작성
-  - 상대가 "항상 바위"일 때 내 전략이 "항상 보"로 수렴
-  - seed 고정 (42, 123, 456) + tolerance
-- [ ] `src/poker_ai/algorithms/regret_matching.py` 구현 (~50줄, red → green)
-- [ ] 두 플레이어 동시 regret matching → 균등 분포 (1/3, 1/3, 1/3) 수렴 시각화
+- [x] `test-writer` 디시플린으로 FAILING 테스트 먼저 작성 (RED 확인)
+  - `tests/unit/test_regret_matching.py` — 4 unit tests
+  - `tests/integration/test_rps_selfplay.py` — 6 self-play tests (seed 42/123/456)
+- [x] `src/poker_ai/algorithms/regret_matching.py` 구현 → **GREEN 10/10 (첫 실행)**
+  - 함수: `regret_matching(cumulative_regret)` — Hart & Mas-Colell 2000 / Neller & Lanctot 2013 Alg.1
+  - 클래스: `RegretMatcher(n_actions, rng)` — RPS demo 전용 wrapper
+- [ ] 두 플레이어 동시 regret matching → 균등 분포 (1/3, 1/3, 1/3) 수렴 **시각화**
 - [ ] W&B에 convergence curve 로깅 (project="poker-ai-hunl")
 
 ## 지금까지 한 일 (Done)
+
+### Phase 1 Week 1 (진행 중, 2026-04-21 착수)
+- ✅ TDD 첫 사이클: RPS Regret Matching
+  - RED: 2개 테스트 파일이 `ModuleNotFoundError`로만 실패 (다른 에러 없음)
+  - GREEN: 구현 첫 실행에서 10/10 pass (1.93s)
+  - 커밋: `968ecc2` — `feat(algorithms): implement regret matching with unit + self-play tests`
+  - 검증된 불변식: 확률합=1, non-negative, negative clipping, zero→uniform, always-rock→paper 수렴, self-play→uniform 수렴
+  - 설계 결정: `RegretMatcher`는 RPS demo 전용, CFR tree traversal에는 pure `regret_matching()` 함수를 직접 사용할 것
 
 ### Phase 0 (환경 세팅) — **완료 2026-04-21**
 - uv 0.11.7 설치 (Homebrew)
