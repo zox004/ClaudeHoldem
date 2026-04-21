@@ -1,0 +1,36 @@
+{
+  "$comment": "Poker AI 프로젝트용 Claude Code 설정",
+  "model": "sonnet",
+  "default_subagent_strategy": "delegate_when_matches",
+  "context_files": [
+    "CLAUDE.md",
+    "PHASE.md"
+  ],
+  "auto_skills": [
+    "poker-ai-dev"
+  ],
+  "tool_permissions": {
+    "Bash": {
+      "allow": [
+        "uv run *",
+        "git status",
+        "git diff*",
+        "git log*",
+        "pytest*",
+        "python -m poker_ai*"
+      ],
+      "deny": [
+        "rm -rf *",
+        "git push --force*",
+        "curl http://*"
+      ]
+    }
+  },
+  "conventions": {
+    "language": "ko",
+    "code_comments_language": "en",
+    "test_framework": "pytest",
+    "formatter": "ruff",
+    "type_checker": "mypy"
+  }
+}

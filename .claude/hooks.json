@@ -1,0 +1,39 @@
+{
+  "description": "Poker AI 프로젝트 Claude Code hooks. 파일 수정 시 자동 검증.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "condition": "file_path contains 'src/poker_ai/' OR file_path contains 'tests/'",
+        "command": "cd \"$CLAUDE_PROJECT_DIR\" && uv run ruff check --fix \"$FILE_PATH\" 2>&1 | head -30",
+        "description": "파일 편집 후 ruff lint 자동 실행"
+      },
+      {
+        "matcher": "Edit|Write",
+        "condition": "file_path matches 'src/poker_ai/algorithms/.*\\.py'",
+        "command": "cd \"$CLAUDE_PROJECT_DIR\" && uv run pytest tests/unit --lf -x --tb=short 2>&1 | tail -40",
+        "description": "알고리즘 코드 수정 시 최근 실패 테스트 재실행"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "condition": "command matches 'rm -rf.*(checkpoints|wandb|\\.venv)'",
+        "action": "block",
+        "message": "체크포인트/wandb/venv 대량 삭제는 금지. 명시적으로 확인 후 수동 실행하세요."
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "condition": "prompt contains 'Phase' OR prompt contains 'phase'",
+        "command": "cat \"$CLAUDE_PROJECT_DIR/PHASE.md\" 2>/dev/null || echo 'PHASE.md 없음. 현재 Phase 0으로 가정.'",
+        "description": "Phase 언급 시 현재 단계 문서 주입"
+      }
+    ]
+  },
+  "notes": [
+    "환경변수 CLAUDE_PROJECT_DIR은 Claude Code가 자동 설정",
+    "FILE_PATH는 PostToolUse hook에서 수정된 파일 경로",
+    "condition 문법은 Claude Code 버전에 따라 차이 있음. docs 확인 후 조정."
+  ]
+}

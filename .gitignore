@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+build/
+dist/
+
+# venv / uv
+.venv/
+
+# 실험 산출물 (CLAUDE.md: 절대 커밋 금지)
+checkpoints/
+wandb/
+outputs/
+multirun/
+
+# OS
+.DS_Store
+
+# 린트 / 테스트 캐시
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 로컬 시크릿
+.env
+.env.local
+
+# Claude Code 머신별 로컬 설정 (permissions 등)
+.claude/settings.local.json
