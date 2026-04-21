@@ -28,6 +28,9 @@ packages = ["src/poker_ai"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: slow tests requiring full training (e.g. Nash convergence)",
+]
 
 [tool.ruff]
 src = ["src"]
