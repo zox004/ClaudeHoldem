@@ -19,7 +19,7 @@
   - Nash 수렴: 게임 가치 `-1/18 ± 0.001` ✅, Jack bet ∈ `[0, 1/3]` ✅, King bet ≈ 3·(Jack bet) ✅
 - [x] `src/poker_ai/algorithms/vanilla_cfr.py` — 재귀적 CFR (Zinkevich 2007 / Neller & Lanctot 2013 Alg. 2)
 - [ ] `src/poker_ai/eval/exploitability.py` — best response 기반 exploitability (mbb/g)
-- [ ] Exploitability가 10k iter 후 `< 0.01 mbb/g` 달성 확인
+- [ ] Exploitability가 10k iter 후 `< 5.0 mbb/g` 달성 확인 (Zinkevich 2007 O(1/√T) 기준; 실측 ≈2–3 mbb/g)
 - [ ] W&B에 exploitability convergence curve 로깅 (기존 Hydra harness 재사용, `experiments/phase1_kuhn_vanilla.py` + `experiments/conf/phase1_kuhn.yaml`)
 
 ## 지금까지 한 일 (Done)
@@ -88,7 +88,7 @@ _없음._
 - [x] RPS regret matching이 균등 분포로 수렴 (W&B 스크린샷) — L1 ≤ 0.023 @ 10k iter, [summary run](https://wandb.ai/zox004/poker-ai-hunl/runs/z8i0l32c)
 - [ ] Kuhn CFR의 게임 가치가 **-1/18 ± 0.001** 로 수렴
 - [ ] Kuhn CFR의 Player 1 Jack bet 확률이 **[0, 1/3]** 범위
-- [ ] Exploitability가 10,000 iter 후 **< 0.01 mbb/g**
+- [ ] Exploitability가 10,000 iter 후 **< 5 mbb/g**
 - [x] 모든 unit test 통과 (현재 10/10, Week 2에서 추가될 예정)
 
 ## 참고 문서

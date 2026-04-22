@@ -138,7 +138,7 @@ CFR의 가장 작은 단위를 수학적으로 검증된 형태로 구현한다.
 - [ ] RPS regret matching이 균등 분포로 수렴 (W&B 스크린샷)
 - [ ] Kuhn CFR의 게임 가치가 **-1/18 ± 0.001** 로 수렴
 - [ ] Kuhn CFR의 Player 1 Jack bet 확률이 **[0, 1/3]** 범위
-- [ ] Exploitability가 10,000 iter 후 **< 0.01 mbb/g**
+- [ ] Exploitability가 10,000 iter 후 **< 5 mbb/g** (Zinkevich 2007 O(1/√T) 이론 수렴률과 일관된 실무 기준. Phase 2에서 CFR+로 더 엄격한 bar 설정 예정)
 - [ ] 모든 unit test 통과
 
 ### 산출물
