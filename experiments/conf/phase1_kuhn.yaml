@@ -1,0 +1,36 @@
+# @package _global_
+# Phase 1 Week 2 — Kuhn Poker Vanilla CFR convergence experiment.
+# Overrides:
+#   uv run python -m experiments.phase1_kuhn_vanilla iterations=1000
+#   uv run python -m experiments.phase1_kuhn_vanilla wandb.mode=disabled
+
+experiment_name: phase1_kuhn_vanilla_cfr
+iterations: 10000
+seed: 42  # Single seed since Vanilla CFR is deterministic.
+          # Phase 2 MCCFR will parametrize seeds for sampling variance.
+n_actions: 2  # Kuhn: PASS, BET
+
+# Log cadence: mix of dense prefix (capture steep initial decay) and sparse tail.
+# Total data points ≈ dense_prefix + (iterations / log_every) ≈ 10 + 100 = 110.
+log_every: 100
+dense_prefix: 10   # iters 1..10 logged every step
+
+# Exit Criterion (Phase 1 acceptance gate).
+exit_criterion_mbb: 5.0           # < 5 mbb/g after 10k iter (Zinkevich 2007 O(1/√T))
+expected_final_mbb: 2.14          # empirical Vanilla CFR result @ 10k iter
+
+wandb:
+  project: poker-ai-hunl
+  tags: [phase1, kuhn, vanilla-cfr]
+  mode: online       # set to "disabled" for pure local runs
+
+# Route every Hydra run to experiments/outputs/<experiment_name>/<timestamp>/
+# .gitignore already excludes outputs/ and multirun/.
+hydra:
+  run:
+    dir: experiments/outputs/${experiment_name}/${now:%Y%m%d-%H%M%S}
+  sweep:
+    dir: experiments/outputs/${experiment_name}/multirun/${now:%Y%m%d-%H%M%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false     # keep cwd = project root so relative imports work
