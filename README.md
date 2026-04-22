@@ -1,123 +1,82 @@
-# Poker AI Roadmap 하네스 — 시작 가이드
+# ClaudeHoldem
 
-이 디렉터리는 **HUNL Deep CFR 포커 AI 개발 프로젝트**를 위한 완성된 Claude Code 하네스입니다. 파일들을 당신의 새 프로젝트 디렉터리에 복사해서 바로 시작하면 됩니다.
+> HUNL(Heads-Up No-Limit Texas Hold'em)에서 **중급자 인간 플레이어를 이기는** Deep CFR 기반 포커 AI.
+> **MacBook M1 Pro 단일 머신 / 개인 프로젝트 완주**가 목표이며, Pluribus 급 재현은 범위 밖.
 
-## 포함된 파일
+## 프로젝트 상태
+
+**현재 Phase**: Phase 2 (CFR+ / Linear CFR + Leduc Poker) — 착수 대기
+**직전 완료**: Phase 1 (Regret Matching + Kuhn CFR) ✅ 2026-04-22
+
+### Phase 진행 트래커
+
+| Phase | 주제 | 목표 | 상태 |
+|---|---|---|---|
+| 0 | 환경 세팅 | uv + .venv + Claude Code 하네스 + M1 MPS 동작 | ✅ 2026-04-21 |
+| **1** | **Regret Matching + Kuhn CFR** | **RPS/Kuhn Nash 수렴, Vanilla CFR, exploitability** | ✅ **2026-04-22** |
+| 2 | CFR+ / Linear CFR + Leduc | Leduc Poker에서 2-bet round CFR 변형 비교 | 🔜 다음 |
+| 3 | Leduc Deep CFR | 첫 딥러닝 CFR, advantage/strategy net | ⬜ |
+| 4 | RLCard NL Hold'em Deep CFR | HUNL에서 실제 학습, 주요 마일스톤 | ⬜ |
+| 5 | 친구 대결, 튜닝, 마무리 | 중급자 상대 평가, 회고 | ⬜ |
+
+## Phase 1 성과 요약
+
+### Exit Criteria 5/5 ✅ (margin 포함)
+
+| Criterion | Target | Actual | Margin |
+|---|---|---|---|
+| RPS L1 to uniform | ≤ 0.05 | 0.023 | 54% |
+| Kuhn game value | −1/18 ± 0.001 | −0.055571 | 편차 1.6% |
+| Kuhn P1 Jack bet prob | ∈ [0, 1/3] | 0.234993 | 범위 70% |
+| Exploitability @ 10k iter | < 5 mbb/g | **2.136 mbb/g** | threshold의 43% |
+| 모든 test GREEN | pass | 193/193 | 100% |
+
+### 수학적 검증
+- **Zinkevich 2007 Vanilla CFR** "A pattern" → Kuhn Nash 수렴
+- **Lanctot 2013 §3.4 3-pass BR** (infoset aggregation) → α-family 4 Nash에서 1e-12 정밀도로 BR(P1)=−1/18, BR(P2)=+1/18
+- **O(1/√T) 이론 수렴률 실증**: log-log slope (100→10000) = **−0.52** (이론 −0.5, 오차 4%)
+
+### 시각화
+- W&B seed run: https://wandb.ai/zox004/poker-ai-hunl/runs/auf1uzeo
+- W&B summary: https://wandb.ai/zox004/poker-ai-hunl/runs/szgdzgqt
+- 2-panel convergence plot (log-log + linear w/ Exit Criterion reference lines)
+
+### 속도
+- 예상 2주 → **실제 2일** (Week 1 RPS + Week 2 Kuhn 연속 진행)
+- **9 commits**, 193 tests GREEN (unit 153 + integration 14 + regression 26)
+
+## 프로젝트 구조
 
 ```
-.
-├── README.md              ← 이 파일
-├── ROADMAP.md             ← 5 Phase 상세 로드맵 (Week 0 ~ Week 16)
-├── CLAUDE.md              ← 프로젝트 헌법. 루트에 둘 것
-├── PHASE.md               ← 현재 Phase 추적. 매 Phase 완료 시 업데이트
-└── .claude/
-    ├── settings.json      ← Claude Code 기본 설정
-    ├── hooks.json         ← 파일 수정 시 자동 검증 훅
-    ├── agents/
-    │   ├── cfr-reviewer.md    ← CFR 수식 정확성 검증 전문가
-    │   ├── rl-debugger.md     ← RL 학습 디버깅 전문가
-    │   └── test-writer.md     ← TDD 강제. 구현 전 실패 테스트 작성
-    └── skills/
-        └── poker-ai-dev/
-            └── SKILL.md    ← HUNL 구현 도메인 컨벤션
+src/poker_ai/
+├── games/          kuhn.py (Phase 1) — Phase 2 leduc.py / Phase 4 nlh_rlcard.py
+├── algorithms/     regret_matching.py, vanilla_cfr.py (Phase 1) — Phase 2 cfr_plus.py, mccfr.py
+├── networks/       Phase 3부터
+├── eval/           exploitability.py (3-pass BR, Leduc-ready)
+└── utils/          Phase 2 reservoir_buffer.py
+
+experiments/        Hydra + W&B harness
+├── conf/           phase1_rps.yaml, phase1_kuhn.yaml
+└── phase1_*.py     단일 엔트리 포인트 per Phase
+
+tests/              193 tests: unit 153 + integration 14 + regression 26
 ```
 
-## 시작하는 법
+## 운영 규칙
 
-### 1. 프로젝트 디렉터리 세팅
-```bash
-# 새 프로젝트 만들기
-mkdir ~/poker-ai && cd ~/poker-ai
+- **문서**: [CLAUDE.md](./CLAUDE.md) 프로젝트 헌법, [PHASE.md](./PHASE.md) 현재 Phase 추적, [ROADMAP.md](./ROADMAP.md) 5 Phase 상세
+- **하네스**: `.claude/agents/` (cfr-reviewer, rl-debugger, test-writer), `.claude/skills/poker-ai-dev/`
+- **실행**: `uv run pytest` (전체 193), `uv run python -m experiments.phase1_kuhn_vanilla` (10k full run ≈ 4초)
 
-# 이 하네스 파일들을 루트에 복사
-cp -r /path/to/poker-ai-roadmap/* .
-cp -r /path/to/poker-ai-roadmap/.claude .
-
-# uv 프로젝트 초기화
-uv init .
-uv add numpy torch rlcard[torch] wandb pytest ruff mypy hydra-core
-
-# Git 시작
-git init
-echo -e "checkpoints/\nwandb/\n.venv/\n__pycache__/\n*.pyc\n.DS_Store" > .gitignore
-git add . && git commit -m "chore: initial harness + roadmap"
-```
-
-### 2. Claude Code 열기
-```bash
-cd ~/poker-ai
-claude   # Claude Code 실행
-```
-
-Claude Code가 열리면:
-- `CLAUDE.md`를 자동으로 읽음
-- `/agents` 로 3개 서브에이전트 확인
-- `/skill` 로 `poker-ai-dev` skill 확인
-
-### 3. 첫 질문 던져보기
-```
-지금 Phase 0 세팅 중이야. 아직 필요한 파일이나 할 일 있어?
-```
-
-Claude가 `PHASE.md`와 `CLAUDE.md`를 참조해서 체크리스트를 확인시켜 줄 것입니다.
-
-### 4. Phase 1 시작
-Phase 0 exit criteria 만족하면:
-```
-Phase 1 시작하자. 로드맵대로 Rock-Paper-Scissors regret matching부터. 
-test-writer 에이전트로 테스트 먼저 짜줘.
-```
-
-## 서브에이전트 호출 패턴
-
-| 상황 | 호출 문장 |
-|---|---|
-| 새 알고리즘 시작 | "test-writer로 [모듈명] 테스트 먼저 짜줘" |
-| CFR 구현 리뷰 | "cfr-reviewer로 [파일명] 검토해줘" |
-| 학습 안 됨 | "rl-debugger로 W&B run [URL] 분석해줘" |
-| 포커 도메인 코드 | "poker-ai-dev skill 참조해서 [작업]" |
-
-## 중요 원칙
-
-- **CLAUDE.md 수정은 신중하게**: 200줄 이내로 유지
-- **Phase exit criteria 건너뛰지 말 것**: 특히 Phase 1의 Kuhn Nash 검증
-- **매 Phase 완료 시 PHASE.md 업데이트**: 다음 세션 컨텍스트 유지용
-- **W&B 로깅은 처음부터**: 나중에 추가하려면 귀찮아짐
-
-## 문제 생겼을 때
-
-1. **Claude가 TDD를 안 따름** → "잠깐, test-writer 에이전트 먼저 호출해서 실패 테스트부터"
-2. **Claude가 hallucination** (존재하지 않는 CFR 변형 주장) → "cfr-reviewer 에이전트로 정확성 체크"
-3. **학습이 안 됨** → "rl-debugger로 분석, 그 다음 `PHASE.md`에 블로커 기록"
-4. **컨텍스트가 흐트러짐 (긴 세션)** → `/clear` 후 `CLAUDE.md + PHASE.md` 로 재시작
-
-## 예상 진행 속도 (주 10~15시간 투자)
-
-| 주차 | Phase | 마일스톤 |
-|---|---|---|
-| Week 0 | 0 | 환경 세팅 |
-| Week 1-2 | 1 | Kuhn Poker CFR 완주, Nash 수렴 |
-| Week 3-4 | 2 | Leduc CFR+/MCCFR 비교 |
-| Week 5-7 | 3 | Leduc Deep CFR 수렴 |
-| Week 8-12 | 4 | RLCard NL Hold'em Deep CFR |
-| Week 13-16 | 5 | 친구 대결, 튜닝, 마무리 |
-
-**현실적 이탈 시나리오**:
-- Phase 3에서 Deep CFR 수렴 안 돼서 +2주
-- Phase 4에서 HUNL 학습 시간 길어서 +2주
-- 친구 대결 결과 미달로 Phase 4 튜닝 재진입
-
-최악의 경우에도 **5개월 이내 프로젝트 완주** 가능성이 높습니다.
-
-## 예산 재확인
+## 하드웨어 / 예산
 
 | 항목 | 비용 |
 |---|---|
-| 하드웨어 (M1 Pro 기존) | $0 |
-| Claude Code 구독 | 기존 |
-| W&B | $0 (개인) |
-| RunPod 클라우드 (선택, Phase 4) | $30~100 |
+| MacBook M1 Pro (기존) | $0 |
+| Claude Code 구독 (기존) | $0 |
+| W&B 개인 플랜 | $0 |
+| RunPod 클라우드 (Phase 4 선택) | $30~100 (예정) |
 
 ---
 
-**다음 할 일**: 이 디렉터리를 당신 프로젝트 루트에 복사하고, `PHASE.md`에 오늘 날짜를 기록한 뒤 Phase 0 체크리스트를 시작하세요.
+**다음 세션**: ROADMAP.md Phase 2 섹션 참조하며 CFR+ vs Linear CFR 비교, Leduc 엔진(직접 구현 vs OpenSpiel), MCCFR 샘플링 방식, exploitability 확장 논의.

@@ -173,6 +173,11 @@ _없음._
 **다음 Phase로 이월된 이슈**:
 - Known Issue 2건 (PHASE.md 상단 섹션 참조): `KuhnState.current_player` terminal 처리, seed parametrize 무의미성 — 둘 다 Phase 2에서 자연스럽게 해소 예정
 
+**Phase 1 전체 회고 (3줄)**:
+1. **Week 1 인프라 투자가 Phase 1 전체 속도의 비결** — Hydra + W&B + RegretMatcher primitive가 Week 2에서 CFR 트리 traversal과 convergence harness로 75% 그대로 재활용되어, Kuhn CFR + Exploitability + 10k full run이 Day 2 하루에 종료됨
+2. **TDD 193 테스트가 수학적 정확성의 유일한 보증** — "순진한 per-state BR max" 오류는 코드 리뷰로 못 잡고 α-family Nash expl≈1e-9 테스트가 잡았음. 이론(Lanctot 2013 §3.4) ↔ 테스트 fixture ↔ 구현의 삼각 검증 없이는 조용히 잘못된 값이 pass
+3. **설계 논의가 구현보다 중요한 비율 70:30** — "alternating A pattern vs C pattern", "chance를 reach_opp에 absorb", "char-based infoset key", "3-pass BR의 deepest-first ordering" 같은 결정이 구현 시간보다 논의 시간이 길었고 그 덕에 재구현 없이 한 번에 GREEN. Phase 2 CFR+ / Leduc에서도 동일 비율 유지
+
 <!-- 템플릿
 ### Phase N (제목)
 **완료일**: YYYY-MM-DD
