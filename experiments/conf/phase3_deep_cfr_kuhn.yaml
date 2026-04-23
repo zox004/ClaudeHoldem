@@ -1,0 +1,49 @@
+# @package _global_
+# Phase 3 Day 2 — Kuhn Deep CFR approximation quality experiment.
+#
+# Trains DeepCFR + VanillaCFR + CFRPlus on Kuhn in parallel, measuring 3
+# correlations at each checkpoint (Primary A = Deep vs Vanilla signed,
+# Primary B = Deep strategy vs CFR+ σ̄, Tertiary = Deep vs CFR+ R⁺ raw)
+# plus σ̄_deep exploitability (Exit #4 secondary dry-run).
+#
+# Overrides:
+#   uv run python -m experiments.phase3_deep_cfr_kuhn   # full T=2000
+#   uv run python -m experiments.phase3_deep_cfr_kuhn iterations=500  # smoke
+#   uv run python -m experiments.phase3_deep_cfr_kuhn wandb.mode=disabled
+
+experiment_name: phase3_deep_cfr_kuhn
+iterations: 2000
+seed: 42
+
+# Deep CFR hyperparameters (design lock A1 + Brown 2019 §3.1 defaults).
+deep_cfr:
+  traversals_per_iter: 100
+  buffer_capacity: 100000
+  batch_size: 64
+  advantage_epochs: 4
+  strategy_epochs: 4
+  device: cpu
+
+# Checkpoints at which to evaluate 3-correlation + σ̄ exploitability.
+checkpoints: [500, 1000, 1500, 2000]
+
+# Exit criteria (Day 2 GREEN gates — mentor 2026-04-24).
+primary_a_green_threshold: 0.9   # Deep adv vs Vanilla signed
+primary_b_green_threshold: 0.85  # Deep strat vs CFR+ σ̄
+sigma_bar_expl_mbb_stretch: 1.0  # σ̄ expl < 1.0 mbb/g for stretch
+
+big_blind: 2.0  # same convention as Phase 2 (Kuhn bb for mbb/g reporting)
+
+wandb:
+  project: poker-ai-hunl
+  tags: [phase3, kuhn, deep-cfr]
+  mode: online
+
+hydra:
+  run:
+    dir: experiments/outputs/${experiment_name}/${now:%Y%m%d-%H%M%S}
+  sweep:
+    dir: experiments/outputs/${experiment_name}/multirun/${now:%Y%m%d-%H%M%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false
