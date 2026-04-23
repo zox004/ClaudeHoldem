@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 1 Infrastructure 완료 (2026-04-23 저녁)**
-**Phase 2 Exit Criteria**: 3/3 PASS (#1 CFR+ 0.000287 / #2 5164× / #3 34×)
-**테스트**: **415 GREEN** (Phase 2 끝 365 + Phase 3 Day 1 신규 51 ─ encode 21 + reservoir 14 + deep_cfr 16. 기존 일부 제거/재편 있을 수 있음; 실측 합 `pytest -m "not slow"` 364)
-**Next**: Day 2 — Kuhn Deep CFR 100-500 iter + correlation 측정 (기본 correctness 확인)
+**Phase**: 3 진행 중 — **Day 2 partial 완료 (2026-04-24), Day 2b (advantage net audit) 착수 예정**
+**Phase 3 Day 2 판정**: Primary B ✅ (0.99) / σ̄_expl ❌ (21.4 mbb/g, baseline 238×) / Primary A trajectory 역행 → Day 2b로 분리
+**테스트**: **unit 336 + integration fast 10 GREEN** (strategy_net_training 8 신규, correlation 11 신규, reservoir 14 + deep_cfr 16 + encode 21 + 기존)
+**Next**: Day 2b — Primary A trajectory 역행 원인 audit (hypothesis A/B/C/D 4개)
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +32,153 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 2 — Strategy net MSE pathology 발견 + Cross-entropy fix (2026-04-24)
+
+> 커밋 `c351f51` (infrastructure + 3-metric), `0431b89` (CE fix).
+
+#### Narrative (pre-smoke 설계 수정 이후)
+
+Step 1-3 (c351f51): 3-metric `compute_correlations` 구현 + `phase3_deep_cfr_kuhn` Hydra/W&B harness + 11 integration tests 작성.
+
+Step Smoke (T=500, K=100, seed=42, 32.7분 CPU):
+
+| T | Primary A | Primary B | Tertiary | σ̄_deep expl | σ̄_CFR+ ref |
+|---|---|---|---|---|---|
+| 100 | 0.8424 | 0.9583 | 0.4464 | 105.4 mbb/g | 0.60 mbb/g |
+| 250 | 0.8125 | 0.9736 | 0.3970 | 109.6 | 0.21 |
+| **500** | **0.7976 ↓** | **0.9892 ↑** | 0.4024 | **117.4 ↑** | **0.09** |
+
+- **Paradox**: Pearson r = 0.99 (strategy 거의 일치) BUT σ̄_expl 1360× worse than baseline
+- **Primary A 역행**: T↑에 따라 correlation **감소** (0.84→0.80) — 별도 구조 이슈
+
+#### 실증 — Per-infoset L∞ analysis (T=100, before fix)
+
+| Infoset | CFR+ σ̄ | Deep σ̄ | L∞ | 범주 |
+|---|---|---|---|---|
+| J\|b | [1.00, 0.00] | [0.71, 0.29] | 0.295 | **PURE** |
+| K\|b | [0.00, 1.00] | [0.28, 0.72] | 0.280 | **PURE** |
+| Q\| | [0.998, 0.002] | [0.63, 0.37] | 0.364 | **PURE** |
+| J\| | [0.81, 0.19] | [0.66, 0.34] | 0.152 | mix |
+| J\|p | [0.67, 0.33] | [0.63, 0.37] | 0.043 | mix |
+
+- Pure strategy infoset 평균 L∞: **0.29**
+- Mixed strategy infoset 평균 L∞: **0.08**
+- **Strategy net output range [0.28, 0.72]로 saturate** — MSE loss가 extreme values 학습 못함
+
+#### Root cause — MSE pathology
+
+MSE gradient magnitude `∂L/∂logit ∝ (pred - target)`는 target이 extreme (0/1)일 때도 bounded. Softmax output range 제한 (0-1) 때문에 predict 0 or 1에 접근하려면 logit이 ±∞가 필요한데 MSE는 그 방향 gradient를 충분히 주지 않음. Result: strategy net이 중간값 [0.3, 0.7]에 collapse.
+
+Pearson correlation은 **affine transform invariant** (`r(aX+b, Y) = r(X, Y)`). 따라서 `σ_deep ≈ 0.44 × σ_CFR+ + 0.28` 같은 shrinkage가 있어도 r = 1에 가까움. 이것이 "correlation 0.99 but expl 1360×"의 수학적 설명.
+
+Exploitability는 pointwise distribution mismatch에 직접 민감. 특히:
+- Jack이 bet faced 시 CFR+ σ = [1.0, 0.0] (fold 100%) vs Deep σ = [0.71, 0.29] (fold 71%, call 29%)
+- 29% bad call로 손실 (bet을 call하면 King한테 -2 chip 잃음) → 수백 mbb/g 증폭
+
+#### Fix — Cross-entropy + legal masking (커밋 `0431b89`)
+
+1. **ReservoirBuffer mask field**: `mask_dim: int = 0` (default backward-compat). strategy buffer만 `mask_dim=n_actions`로 생성
+2. **`_traverse`가 legal_mask 저장**: `strategy_buffer.add(encoding, σ, iter_weight, mask=legal_mask)`
+3. **Cross-entropy loss** (strategy net only — advantage net 미수정):
+   ```python
+   masked = torch.where(legal_mask, logits, -inf)
+   log_probs = F.log_softmax(masked, dim=-1)
+   # Soft-target CE with illegal-guard
+   terms = torch.where(target > 0.0, target * log_probs, zeros)
+   loss = (-(terms.sum(dim=-1)) * iter_weight).mean()
+   ```
+
+#### Post-fix 측정 (T=500, same seed/config)
+
+|  | σ̄_expl before (MSE) | σ̄_expl after (CE) | improvement |
+|---|---|---|---|
+| T=100 | 105.4 | **24.8** | 4.2× |
+| T=250 | 109.6 | **20.3** | 5.4× |
+| T=500 | 117.4 | **21.4** | 5.5× |
+
+Per-infoset L∞ (post-fix, T=100):
+
+| Infoset | before | after | 개선 |
+|---|---|---|---|
+| J\|b | 0.295 | **0.065** | 4.5× |
+| K\|b | 0.280 | **0.033** | 8.5× |
+| Q\| | 0.364 | 0.214 | 1.7× (여전히 worst) |
+| Pure avg | 0.29 | **0.10** | **3×** |
+| Mixed avg | 0.08 | 0.09 | ≈ (일부 tradeoff) |
+
+#### Day 2 판정
+
+| 기준 (Step 3) | 목표 | 실측 @ T=500 | 판정 |
+|---|---|---|---|
+| Primary A > 0.8 (완화) | > 0.8 | 0.7976 | ❌ by 0.004 (Day 2b 분리) |
+| Primary B > 0.95 | > 0.95 | **0.9893** | ✅ |
+| σ̄_expl < 5 mbb/g | < 5 | 21.4 | ❌ (238× baseline) |
+
+**Partial success**: CE fix가 정확히 진단한 문제 (pure strategy 학습) 해결. 남은 expl 21 mbb/g는 Primary A trajectory 역행이 상한선 역할 — **Primary A 해결 없이 σ̄_expl 완전 개선 불가능**.
+
+#### 교육적 발견 — Pearson 단독 불충분성
+
+Phase 3 Day 2 discovery (2026-04-24): **Strategy net MSE loss fails on pure-strategy infoset. Pearson r=0.99 with σ̄_CFR+ masks scale/offset mismatch. Per-infoset analysis: mixed L∞ ~0.05 OK, pure L∞ ~0.30 FAIL. Cross-entropy with -inf legal masking restores extreme values. Phase 2 audit pattern scaled up: Pearson correlation alone is insufficient for strategy space; exploitability ground-truth needed.**
+
+이 자산은 Phase 2 Day 5/6 "unit test 통과 + 실수렴 실패" 패턴과 동일 계층. Phase 3 내내 "correlation + pointwise metric 이중 검증" 원칙으로 유지.
+
+#### Day 2b plan — Advantage net trajectory 역행 audit
+
+**관찰**: Primary A 0.8424 (T=100) → 0.8125 (T=250) → 0.7976 (T=500). T 증가에 따라 **감소** — 정상 학습이면 상승해야 함.
+
+**4 hypotheses**:
+
+| # | Hypothesis | 검증 실험 | 예상 cost |
+|---|---|---|---|
+| A | iter_weight=T 폭주 — 후기 sample이 loss 지배 → recent-biased 학습 | iter_weight=`T/T_total` normalize 후 T=500 재실행 | 1× smoke (~33분) |
+| B | Buffer 포화 + from-scratch reinit → 학습 부족 | buffer_capacity 100k → 1M, T=500 재실행 | 1× smoke |
+| C | From-scratch reinit 자체 — warm-start가 더 나을 수 있음 | 매 iter optimizer 유지, T=500 | 1× smoke |
+| D | Advantage target scale drift — `v_a - v_node` magnitude가 후기에 작아짐 | Target normalize (÷ T or ÷ reach), T=500 | 1× smoke |
+
+총 4-5시간 (각 smoke 33-45분). 가설 A부터 가장 구현 저렴.
+
+### Phase 3 Day 2 pre-smoke — Exit #4 primary metric 설계 수정 (2026-04-24)
+
+> 교육적 발견 — Day 5/6 audit 기록과 같은 층위.
+
+**Phase 3 Day 2 pre-smoke 발견 (2026-04-24)**: 멘토 설계상 `correlation(tabular CFR+ R⁺, Deep net) > 0.95`가 수학적 부정확. Deep CFR는 **Vanilla signed regret의 근사** (Brown 2019 Algorithm 1 Line 5)이지 CFR+의 positive-clipped regret 근사가 아님. Smoke에서 **Deep vs CFR+ r=0.40 vs Deep vs Vanilla r=0.82** 실측으로 구조적 차이 드러남. Reference algorithm 전환 (CFR+ → Vanilla, strategy space 추가). Phase 3 내내 이 수정 기준 유지.
+
+#### 근거: Brown 2019 Algorithm 1 Line 5
+
+Deep CFR advantage network 학습 target:
+- `r̃_p^t(I, a) = π_{-p}(I) · (v_{I,a} - v_I)` — **signed** instantaneous regret
+- Network output V̂(I, a) ≈ `Σ_t w_t · r̃_t(I,a) / Σ_t w_t` (linear-CFR-weighted time average, signed)
+- Vanilla CFR의 `cumulative_regret`은 같은 signed 양의 unweighted time sum
+- CFR+의 `cumulative_regret`은 **positive-part clipping**으로 non-negative-by-construction — 수학적으로 **다른 객체**
+
+#### 실측 (K=20, T=100 smoke, seed=42)
+
+| Reference | vec range | n_pos / n_neg | Pearson r (Deep net vs 이 ref) |
+|---|---|---|---|
+| **Vanilla R_cum** (signed) | [-18.3, 1.7] std=6.02 | 17 / 7 | **0.8186** |
+| **CFR+ R_cum** (positive-only) | [0.0, 0.56] std=0.16 | 17 / 0 | 0.3993 |
+| Deep net output | [-2.7, 0.15] std=0.76 | 13 / 11 | — (reference) |
+| Deep(positive-clipped) vs CFR+ | — | — | 0.1095 (clipping도 해결 못함) |
+
+#### Phase 3 Exit #4 metric 설계 (수정 후)
+
+- **Primary A** (`primary_a_advantage_vs_vanilla`): `corr(advantage_net, Vanilla R_cum)` — **> 0.95** (stretch) / > 0.9 (GREEN)
+- **Primary B** (`primary_b_strategy_vs_sigma_bar`): `corr(strategy_net_softmax, CFR+ σ̄)` — simplex space, > 0.85 (GREEN) / > 0.9 (stretch)
+- **Tertiary** (`tertiary_advantage_vs_cfr_plus`): `corr(advantage_net, CFR+ R⁺)` — **diagnostic only**, 낮게 나오는 게 정상. 설계 수정 증거로 로그에 남김
+
+#### Pearson scale-invariance 문서화
+
+Pearson `r(aX+b, Y) = r(X, Y)`. 따라서:
+- Deep net output은 linear-CFR-weighted avg (정규화 `T_norm = Σ_t w_t = T(T+1)/2`)
+- Vanilla R_cum은 unweighted sum
+- 두 quantity 간 scale/weighting 차이가 있어도 **선형 관계만 보존되면 Pearson 값 동일**
+- 구현은 raw-vs-raw 비교로 충분. T_norm 인자 명시적 계산 불필요
+
+#### 구현
+
+- `src/poker_ai/eval/deep_cfr_correlation.py` 확장: `CorrelationReport` dataclass + `compute_correlations(deep, vanilla, cfr_plus, game)` 추가. 기존 `compute_flat_correlation` (tertiary)는 backward-compat로 유지.
+- `experiments/phase3_deep_cfr_kuhn.py` + yaml: 3 trainer 병렬 + checkpoint별 3-correlation + σ̄_deep expl + W&B log + 2-panel PNG.
 
 ### Phase 3 Day 1 (2026-04-23 저녁) — Deep CFR Infrastructure 구축
 
