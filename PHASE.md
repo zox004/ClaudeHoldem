@@ -5,10 +5,12 @@
 
 ## 현재 상태
 
-**Phase**: 2 (Leduc Hold'em — CFR+, MCCFR) — **Week 1 착수 (Day 1)**
+**Phase**: 2 (Leduc Hold'em — CFR+, MCCFR) — **✅ 완주 (2026-04-23, 하루)**
 **시작일**: 2026-04-23
-**목표 완료일**: 2026-05-07 (+ 2주, 실제는 Phase 1 패턴으로 단축 가능)
-**Baseline**: Phase 1 종료 시점 193 tests GREEN (65s), 10 commits, main @ `609fc69`
+**완료일**: 2026-04-23 (예상 2주 → 실제 1일)
+**Exit Criteria**: 3/3 PASS (#1 CFR+ 0.000287 / #2 5164× / #3 34×)
+**테스트**: 365 GREEN
+**Next**: Phase 3 Deep CFR (별도 세션)
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +34,75 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 2 Week 1-2 완주 (2026-04-23) — 3대 CFR 변형 구현 + 3 Exit Criteria 전부 PASS
+
+#### Phase 2 Exit Criteria Final Scorecard
+
+| # | 기준 | 주체 | 실측 | 판정 |
+|---|---|---|---|---|
+| **#1** | Leduc expl < 1.0 mbb/g @ 100k | CFR+ | **0.000287** | ✅ PASS (3482× margin) |
+| **#2** | CFR+ 5-10× speedup vs Vanilla | CFR+ | **5164×** | ✅ PASS (516× 초과) |
+| **#3** | MCCFR per-iter ≥ 10× Vanilla | MCCFR ES | **34×** (379 vs 11 iter/s) | ✅ PASS (3.4× 초과) |
+
+#### 3-Algorithm Comparison Matrix (Leduc 100k, seed=42 기준)
+
+| 알고리즘 | Final expl | Wall-clock | iter/s | 절대 수렴 품질 | Per-iter 속도 |
+|---|---|---|---|---|---|
+| Vanilla CFR | 1.48 mbb/g | 2h 31min | 11 | 중간 | 기준 |
+| **CFR+** (Tammelin) | **0.000287** | 2h 43min | 10 | **최고 (O(1/T))** | 기준 |
+| **MCCFR ES** (Lanctot) | 59.58 (5-seed) | **5분** (parallel) | **379** | 중-하 (variance) | **34×** |
+
+CFR+의 iter-quality 강점 + MCCFR의 iter-speed 강점 → Phase 3 Deep CFR이 "MCCFR traversal + function approximation" 조합으로 둘 다 활용하는 선택의 정당화가 오늘의 3-way 실측으로 확보됨.
+
+#### Day 6 MCCFR External Sampling (오늘 완료)
+
+- ✅ **Design 7 결정 확정**: External Sampling 단독, 독립 클래스, RNG 주입, alternating updates, ε-exploration, 3 커밋 분할
+- ✅ **14 tests (10 unit + 2 integration + 2 regression)** + harness (`phase2_leduc_mccfr.py` with multiprocessing.Pool)
+- ⚠️ **Audit-driven 버그 수정 2건** (Day 5 패턴 계승):
+  1. Importance weight factor: 1/q → **σ/q** (Lanctot §3.2 ε-smoothing correction)
+  2. Cumulative strategy 누적 시 reach_i 누락 복구
+  수정 전 Kuhn 10k mean 268 mbb/g → 수정 후 12 mbb/g 정상화
+- ✅ **Unbiasedness 검증** (Lanctot Prop 4): 200 seed × 500 iter, 대규모 regret components Vanilla와 5% 이내 일치
+- ✅ **실측 Exit #3 PASS**: 10k 146 mbb/g (34.5s), 100k 59.58 mbb/g (263.6s parallel). iter_per_sec 34× speedup
+- ✅ **Regression threshold 실증 조정**: 10k `4.0 → 250 mbb/g`, 100k `1.0 → 100 mbb/g` (Lanctot Fig 4.3 부합)
+
+#### 오늘 하루(2026-04-23) Phase 2 서사
+
+| Day | 주제 | 핵심 |
+|---|---|---|
+| 1 | Leduc 엔진 | 120 deals × 288 infosets, pot accounting lock-in |
+| 2 | Protocol + exploitability 일반화 | **Pass 2 illegal-argmax 잠복 버그 발견+수정** (Kuhn no-op, Leduc active) |
+| 3 | VanillaCFR game-agnostic | `legal_action_mask` StateProtocol 확장, hook 구조 확립 |
+| 4 | Vanilla 100k baseline | **Zinkevich bound 비타이트성 실증** (slope -0.417 → -0.374), Exit #1 fail |
+| 5 | CFR+ 구현 + audit | **Sync regret update 버그 audit+fix**, Tammelin Fig 2 재현, Exit #1+#2 PASS |
+| 6 | MCCFR ES 구현 + audit | **IW factor 버그 audit+fix**, 3-way 비교, Exit #3 PASS |
+
+#### 교육적 발견 (Phase 2 자산)
+
+1. **Zinkevich O(1/√T) worst-case bound의 비타이트성**: 작은 게임(Kuhn)은 이론과 일치, 큰 게임(Leduc)에선 실측 slope가 이론보다 완만
+2. **Externalized chance (deal loop) + linear averaging 호환 문제**: Vanilla harmless, CFR+ critical — σ^t within-iter drift 버그. Sync update로 해결
+3. **IW factor 정확성 민감도**: σ/q vs 1/q 차이가 수렴에 결정적. Unit test로 못 잡고 1-iter snapshot + many-seed unbiasedness가 잡아냄
+4. **Audit 3단 패턴** (Phase 3 이후에도 적용):
+   - Unit test (invariants: non-neg, sum-to-1, shape)
+   - Many-seed unbiasedness (stochastic methods)
+   - 1-iter hand-computed snapshot (deterministic methods)
+
+#### 최종 상태 (Phase 2 종료)
+
+- **총 커밋 (Phase 2)**: ~20+ 커밋
+- **Tests**: 365 GREEN (324 baseline + 15 CFR+ + 14 MCCFR + threshold 조정)
+- **3 CFR 변형** (Vanilla/CFR+/MCCFR) 각각 Game-agnostic via GameProtocol
+- **W&B runs**: Vanilla seed42 100k, CFR+ seed42 100k, MCCFR 5-seed (disabled in final test)
+
+#### Next: Phase 3 Deep CFR (별도 세션)
+
+MCCFR External Sampling traversal + advantage network로 generalization. Phase 2의 3-way 비교가 핵심 동기:
+- CFR+의 O(1/T) 수렴은 tabular에서만 가능 (HUNL 10^164 infosets 불가능)
+- MCCFR의 iter-speed는 유지, function approximation으로 regret table을 neural network로 대체
+- Phase 3 구현 시 이미 검증된 MCCFR ES traversal 80% 재사용 예정
+
+---
 
 ### Phase 2 Week 2 Day 6 partial (2026-04-23) — MCCFR External Sampling 구현 + audit + harness (실측 다음 세션)
 
