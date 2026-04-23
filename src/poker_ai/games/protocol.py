@@ -1,0 +1,64 @@
+"""Structural typing for game engines usable by CFR / BR algorithms.
+
+Uses :class:`typing.Protocol` (runtime-checkable) rather than ABC so that
+concrete games (Kuhn, Leduc) satisfy these via duck typing alone — no
+inheritance required. This keeps the Phase 2 refactor minimal: existing
+Kuhn and Leduc classes need no changes beyond a trivial ``NUM_ACTIONS``
+constant (Kuhn) that was missing before.
+
+Over-specification guardrails (intentionally EXCLUDED from the Protocols
+to avoid locking in premature abstractions):
+
+- ``legal_action_mask``: Leduc-only. Kuhn has all actions legal at every
+  decision, so exposing an explicit mask on every state would be noise.
+- ``private_cards`` / ``cards``: name differs (Kuhn uses ``cards``, Leduc
+  uses ``private_cards``). Don't bake either name into the structural type.
+- ``round_idx`` / ``board_card`` / ``bets_this_round``: Leduc-only.
+- ``history`` / ``round_history``: shape differs between games.
+
+If Phase 3 NLHE requires a richer contract (e.g. action abstraction info,
+card bucketing handles), reconsider promoting to ABC at that point.
+
+Reference: :pep:`544` Protocol structural subtyping.
+"""
+
+from __future__ import annotations
+
+from enum import IntEnum
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class StateProtocol(Protocol):
+    """Structural type for a game state usable by CFR / BR algorithms."""
+
+    @property
+    def is_terminal(self) -> bool: ...
+
+    @property
+    def current_player(self) -> int: ...
+
+    @property
+    def infoset_key(self) -> str: ...
+
+    def legal_actions(self) -> tuple[IntEnum, ...]: ...
+
+    def next_state(self, action: IntEnum) -> StateProtocol: ...
+
+
+@runtime_checkable
+class GameProtocol(Protocol):
+    """Structural type for a 2-player imperfect-information game factory.
+
+    Methods are declared with instance-method signatures, but a conforming
+    implementation may use ``@staticmethod`` (both Kuhn and Leduc do so).
+    Runtime ``isinstance`` checks only verify attribute presence.
+    """
+
+    NUM_ACTIONS: int
+
+    def all_deals(self) -> tuple[Any, ...]: ...
+
+    def state_from_deal(self, deal: Any) -> StateProtocol: ...
+
+    def terminal_utility(self, state: StateProtocol) -> float: ...

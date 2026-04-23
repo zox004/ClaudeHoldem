@@ -101,6 +101,7 @@ class KuhnState:
 class KuhnPoker:
     NUM_PLAYERS = 2
     NUM_CARDS = 3
+    NUM_ACTIONS: int = 2   # PASS, BET — Phase 2 GameProtocol conformance
 
     # Six deals of 2 distinct cards from {J, Q, K}. Fixed order for determinism.
     _DEALS: tuple[tuple[int, int], ...] = (
