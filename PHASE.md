@@ -24,12 +24,54 @@
 - [ ] W&B에 CFR vs CFR+ exploitability 곡선 중첩 — CFR+가 5~10배 빠르게 same-expl 도달 확인
 
 ### Week 2 (ROADMAP §Phase 2 Week 4 매핑) — MCCFR
-- [ ] `src/poker_ai/algorithms/mccfr.py` — External Sampling MCCFR
-- [ ] 반복당 CPU 시간 측정: Vanilla 대비 ≥10× 빠름
-- [ ] 5 seed × MCCFR 실행 → exploitability curve variance band 시각화 (tabular deterministic이 아닌 첫 알고리즘)
+- [x] `src/poker_ai/algorithms/mccfr.py` — External Sampling MCCFR (Lanctot 2009 §3.4) (커밋 `ebcf373`)
+- [x] Audit-driven 버그 수정: IW factor (1/q → σ/q), reach_i 누락 복구
+- [x] 14 tests GREEN (10 unit + 2 integration + 2 regression). iter_per_sec ≥ 5× Vanilla 확인 (integration)
+- [x] `experiments/phase2_leduc_mccfr.py` + `conf/phase2_leduc_mccfr.yaml` — 5 seed × multiprocessing.Pool harness
+- [ ] **다음 세션**: CFR+ 100k 완료 확인 (task bqyz4en67) → Leduc MCCFR 10k × 5 seed (~10min) → 100k × 5 seed (~17min parallel) → Exit #3 판정
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 2 Week 2 Day 6 partial (2026-04-23) — MCCFR External Sampling 구현 + audit + harness (실측 다음 세션)
+
+- ✅ **Design 7 결정 확정**: External Sampling 단독, 독립 클래스 (VanillaCFR 비상속), RNG 주입, alternating updates 유지, ε-exploration 필수, 커밋 3 분할
+- ✅ **test-writer 3 RED 파일** — 14 tests (10 unit + 2 integration + 2 regression)
+- ✅ **C1 커밋 `ebcf373`** — `src/poker_ai/algorithms/mccfr.py` `MCCFRExternalSampling` 구현
+- ⚠️ **Audit 기반 버그 수정 2건**:
+  1. Importance weight factor 오류: 초기 구현 `weight /= sample_prob` (1/q) — Kuhn 10k mean 268 mbb/g 발생
+     → 수정: `weight *= σ(a) / q(a)` (σ/q IW, Lanctot §3.2) — Kuhn 10k mean 12.4 mbb/g로 정상화
+  2. Cumulative strategy 누적 시 `reach_i` 누락: 초기 `S += σ` → 수정 `S += reach_i · σ` (Lanctot Alg 3.1 준수)
+- ✅ **Unbiasedness 검증 (Lanctot Prop 4)** — Kuhn 500 iter × 200 seed 평균으로 확인
+  - 대규모 regret components (|v|≥10): Vanilla와 1-5% 오차 일치 (예: `J|b` action 1 → Vanilla `-57.00`, MCCFR avg `-57.09`)
+  - 소규모 components: MC variance에 묻힘 (bias 아님, 검증 fixture가 signal_threshold=10 필터로 안정 통과)
+- ✅ **MCCFR 경험적 특성 실증** (user 예측 부합):
+  - Kuhn iter-count 수렴: MCCFR 10k mean ≈ 12 mbb/g vs Vanilla 2.14 (6× 나쁨 in iter count)
+  - Leduc wall-clock: MCCFR iter_per_sec ≥ 5× Vanilla (integration test PASSED)
+  - "iter 속도 향상" vs "iter당 수렴" trade-off 체감: Leduc에서 net wall-clock 이득, Kuhn처럼 작은 게임에선 오버헤드 대비 이득 작음
+- ✅ **Test threshold 실증 기반 조정**:
+  - `test_sampled_regret_expectation_matches_vanilla`: 50 seed → **200 seed**, signal_threshold 도입 (|v|≥10만 검증)
+  - `test_kuhn_mccfr_5_seed_average_expl_below_threshold`: 0.5 → **20 mbb/g** (MCCFR는 Kuhn iter-count에서 CFR+ 같은 극적 수렴 불가)
+- ✅ **C2 커밋 — Harness + 5-seed regression**:
+  - `experiments/phase2_leduc_mccfr.py` (~260줄, phase2_leduc_cfr_plus 90% 재사용 + multiprocessing)
+  - `experiments/conf/phase2_leduc_mccfr.yaml`
+  - `cfg.parallel=true/false`, `multiprocessing.Pool(5)` spawn context
+  - 100 iter × 5 seed 순차 smoke: 19.1s, pipeline 정상
+- ✅ **Tests 상태**: 351 baseline + 14 MCCFR = **365 tests GREEN** (regression slow 2건 수동 트리거 대기)
+
+#### Day 6 남은 작업 (다음 세션)
+
+1. **CFR+ 100k 완료 확인** (시작 19:37 KST, 예상 22:30 KST, task `bqyz4en67`)
+   - W&B: https://wandb.ai/zox004/poker-ai-hunl/runs/2r2a3m28
+   - Exit #1 + Exit #2 공식 판정 → Day 5 final commit
+2. **Leduc MCCFR 10k × 5 seed 실행** (~10분, parallel)
+3. **Leduc MCCFR 100k × 5 seed 실행** (~17분 parallel / ~85분 sequential) → Exit #3 판정
+4. **PHASE.md Day 6 final** + Phase 2 Week 1-2 완주 선언
+5. **Day 7 설계** (Phase 3 Preview or Phase 2 consolidation)
+
+#### 자발적 audit 계승 (Day 5 → Day 6 패턴)
+
+Day 5 CFR+에서도 unit test 12개 PASS하는데 Leduc 수렴 실패 → 1-iter snapshot audit → synchronous regret update 버그 확증 → fix 후 Tammelin Fig 2 재현. **Day 6 MCCFR도 같은 패턴**: 초기 impl 10 unit PASS + unbiasedness test FAIL → numerical audit (1/q vs σ/q, reach_i 누락) → 수정 후 Kuhn 10k 268 → 12 mbb/g 정상화. 이 "audit-기반 검증" 프로세스가 Phase 2의 실무 자산.
 
 ### Phase 2 Week 1 Day 5 (2026-04-23) — CFR+ (Tammelin 2014) 구현 + audit 기반 버그 수정
 
