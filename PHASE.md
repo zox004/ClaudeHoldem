@@ -5,25 +5,50 @@
 
 ## 현재 상태
 
-**Phase**: 1 (Regret Matching + Kuhn CFR) — **완료 ✅ (2026-04-22, Day 2)**
-**시작일**: 2026-04-21
-**완료일**: 2026-04-22 (예상 2주 → 실제 2일, Week 1 RPS + Week 2 Kuhn CFR 연속 진행)
+**Phase**: 2 (Leduc Hold'em — CFR+, MCCFR) — **Week 1 착수 (Day 1)**
+**시작일**: 2026-04-23
+**목표 완료일**: 2026-05-07 (+ 2주, 실제는 Phase 1 패턴으로 단축 가능)
+**Baseline**: Phase 1 종료 시점 193 tests GREEN (65s), 10 commits, main @ `609fc69`
 
-## 다음 할 일 (Next Action) — Phase 2 착수 준비
+## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
-Phase 1 완료. Phase 2 (CFR+ / Linear CFR + Leduc Poker) 착수 전 ROADMAP.md Phase 2 섹션 재독 + Exit Criteria 브리핑 필요.
+### Week 1 (ROADMAP §Phase 2 Week 3 매핑) — Leduc 게임 + Vanilla → CFR+
+- [x] **Leduc 엔진 설계 논의 확정** — 4가지 결정 확정 (CFR+만, 직접 구현, External Sampling, 3-pass BR 재사용) + Q2 세부 (IntEnum FCR, 120 deals, reach_opp=1/120, @property 파생, regret_matching legal_mask 옵션)
+- [x] `tests/unit/test_leduc.py` + `tests/regression/test_leduc_perfect_recall.py` — 71 tests GREEN (59 unit + 12 regression, 288 infoset 검증 포함) (커밋 `1fa143e`)
+- [x] `src/poker_ai/games/leduc.py` — Leduc Hold'em 엔진 (120 deals, 288 infosets, pot accounting rrf=-3/cc.rrf=-5) (커밋 `1fa143e`)
+- [ ] **Day 2** — `src/poker_ai/games/protocol.py` (GameProtocol/StateProtocol) + `exploitability.py` game-agnostic 리팩토링 + `regret_matching` legal_mask 옵션 추가 (Kuhn 193 + Leduc 71 GREEN 유지)
+- [ ] **Day 3** — Leduc Vanilla CFR (재활용된 VanillaCFR를 GameProtocol로 일반화, 기존 Kuhn 수렴은 GREEN 유지)
+- [ ] **Day 4** — `tests/regression/test_leduc_vanilla_cfr_convergence.py` — Leduc Vanilla CFR 10만 iter에서 exploitability < 1 mbb/g (Exit #1)
+- [ ] **Day 5** — `src/poker_ai/algorithms/cfr_plus.py` (Tammelin 2014: 음수 regret clipping + alternating + linear averaging) + CFR vs CFR+ 비교 실험 (Exit #2)
+- [ ] W&B에 CFR vs CFR+ exploitability 곡선 중첩 — CFR+가 5~10배 빠르게 same-expl 도달 확인
 
-### Phase 1 완료된 할 일
-- [x] `tests/unit/test_kuhn.py` + `tests/regression/test_kuhn_perfect_recall.py` — 112 tests GREEN
-- [x] `src/poker_ai/games/kuhn.py` — 3장 덱, 12 infoset Kuhn Poker 엔진 (커밋 `d1f316c`)
-- [x] `tests/regression/test_kuhn_convergence.py` + unit + integration — 38 tests GREEN (커밋 `86ef8b1`)
-- [x] `src/poker_ai/algorithms/vanilla_cfr.py` — 재귀적 CFR (Zinkevich 2007 / Neller & Lanctot 2013 Alg. 2)
-- [x] `src/poker_ai/eval/exploitability.py` — 3-pass BR 기반 exploitability (커밋 `b7895fb`)
-- [x] α-family Nash BR value lock-in 테스트 (커밋 `0457d80`)
-- [x] Exploitability가 10k iter 후 `< 5.0 mbb/g` 달성: **2.136 mbb/g** @ 10k (iters_to_exit=1700)
-- [x] W&B에 exploitability convergence curve 로깅 — `experiments/phase1_kuhn_vanilla.py` + `experiments/conf/phase1_kuhn.yaml`
+### Week 2 (ROADMAP §Phase 2 Week 4 매핑) — MCCFR
+- [ ] `src/poker_ai/algorithms/mccfr.py` — External Sampling MCCFR
+- [ ] 반복당 CPU 시간 측정: Vanilla 대비 ≥10× 빠름
+- [ ] 5 seed × MCCFR 실행 → exploitability curve variance band 시각화 (tabular deterministic이 아닌 첫 알고리즘)
+- [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 2 Week 1 Day 1 (2026-04-23) — Leduc 엔진 구현
+
+- ✅ **Phase 2 설계 논의** — 4가지 핵심 결정 (CFR+만 / Leduc 직접 구현 / External Sampling MCCFR / 3-pass BR 재사용) + Q2 세부 설계 (IntEnum `FOLD=0 CALL=1 RAISE=2`, 120 deals chance 1/120, `@property` derived, regret_matching legal_mask 옵션) 확정
+- ✅ **Leduc 엔진 FAILING 테스트 작성 (test-writer 1차 + 2차 보강)** — 총 71 tests (59 unit + 12 regression)
+  - 1차: 33 methods (IntEnum, all_deals, State properties, legal_actions, infoset_key, terminal_utility 6종, next_state immutability)
+  - 2차 보강 5 methods: `rrf` (-3), `cc.rrf` (-5), P1 pair win 대칭, fold card-invariant (parametrize × 4), chance probability 1/120 명시
+  - 전부 `ModuleNotFoundError`만으로 깔끔한 RED 달성
+- ✅ **Leduc 엔진 구현** (`src/poker_ai/games/leduc.py`, 259줄, 커밋 `1fa143e`) — 71/71 GREEN
+  - Static terminal utility dispatch (fold/showdown 분기 + `_round_commits` helper로 pot accounting)
+  - `@property` 파생: `round_idx`, `bets_this_round`, `current_player`, `is_terminal`, `infoset_key` (Kuhn 패턴 동일)
+  - `_pending_board` 필드: 딜 시점 board_card 저장, round 1 closure 시 `board_card`로 promote
+  - `_is_round_closed`: 마지막 action이 CALL이고 `len ≥ 2`이면 라운드 종료 (cc/rc/crc/rrc/crrc)
+  - 288 infosets DFS 탐색 검증 (Neller & Lanctot 2013 §5 Table 2 일치)
+  - Full suite 264 passed in 62.6s (193 Kuhn + 71 Leduc). Ruff + mypy strict clean
+- ✅ **설계 결정 기록**:
+  - Abstract Game 인터페이스 범위는 **Protocol로 제한** (ABC 상속 거부 — 구체 게임 2개뿐인 시점에 조기 고착 방지, Phase 3 NLHE 요구사항 나올 때 ABC 승격 가능)
+  - `_pending_board` 필드는 "public이지만 internal 의미"임을 underscore로 명시 (dataclass slots 호환)
+  - Raise semantics "call + bet_size" 검증의 핵심은 `rrf = -3` (round 1) 와 `cc.rrf = -5` (round 2 bet=4) 두 테스트. Phase 2 리팩터링 중 실수로 수학 변경 시 즉각 잡힘
+  - Kuhn 193 tests 완전 무수정 — Day 2 리팩터링에서 일반화 예정
 
 ### Phase 1 Week 2 (진행 중, 2026-04-21 착수)
 - ✅ **Day 1** (2026-04-21): Kuhn Poker 게임 엔진 구현 (커밋 `d1f316c`) — **112 tests GREEN (107 unit + 5 regression)**
