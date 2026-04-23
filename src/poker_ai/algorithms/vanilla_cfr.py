@@ -43,7 +43,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from poker_ai.algorithms.regret_matching import regret_matching
-from poker_ai.games.kuhn import KuhnAction, KuhnPoker, KuhnState
+from poker_ai.games.kuhn import KuhnAction  # Kuhn-specific action constructor; Day 3 will generalize
+from poker_ai.games.protocol import GameProtocol, StateProtocol
 
 
 @dataclass
@@ -66,7 +67,7 @@ class VanillaCFR:
     One ``train`` iteration = one alternating cycle (both players updated once).
     """
 
-    def __init__(self, game: KuhnPoker, n_actions: int = 2) -> None:
+    def __init__(self, game: GameProtocol, n_actions: int = 2) -> None:
         self.game = game
         self.n_actions = n_actions
         self.infosets: dict[str, InfosetData] = {}
@@ -129,7 +130,7 @@ class VanillaCFR:
         def sigma(key: str) -> np.ndarray:
             return avg.get(key, np.full(self.n_actions, 1.0 / self.n_actions))
 
-        def expected_utility(state: KuhnState) -> float:
+        def expected_utility(state: StateProtocol) -> float:
             if state.is_terminal:
                 # terminal_utility is already from P1's perspective.
                 return self.game.terminal_utility(state)
@@ -151,7 +152,7 @@ class VanillaCFR:
 
     def _cfr(
         self,
-        state: KuhnState,
+        state: StateProtocol,
         updating_player: int,
         reach_i: float,
         reach_opp: float,
