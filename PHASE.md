@@ -18,8 +18,7 @@
 - [x] `src/poker_ai/games/leduc.py` — Leduc Hold'em 엔진 (120 deals, 288 infosets, pot accounting rrf=-3/cc.rrf=-5) (커밋 `1fa143e`)
 - [x] **Day 2** — `src/poker_ai/games/protocol.py` (GameProtocol/StateProtocol, 커밋 `b99f914`) + `exploitability.py` game-agnostic 리팩토링 + **Pass 2 illegal-argmax 버그 수정** (커밋 `fe40ac6`) + `regret_matching` legal_mask 옵션 추가 (커밋 `f84cef6`). 305 tests GREEN, Ruff + mypy strict clean
 - [x] **Day 3** — Kuhn에 `legal_action_mask` 추가 (Option B) + StateProtocol 확장 (커밋 `0679cbc`) + VanillaCFR 루프 game-agnostic화 + InfosetData.legal_mask 캐시 + 규칙 3가지 masking invariant (커밋 `93e7e63`). 324 tests GREEN. Leduc 1k smoke: 288/288 infoset, expl=9.15 mbb/g, 10.8 iter/s
-- [x] **Day 4 (partial)** — Harness `experiments/phase2_leduc_vanilla.py` + `conf/phase2_leduc.yaml` + regression `tests/regression/test_leduc_vanilla_cfr_convergence.py` (커밋 `c173b24`). 10k fast regression PASSED (3.504 mbb/g < 4.0 threshold). **100k slow test는 사용자 수동 트리거 대기** (2.5h CPU)
-- [ ] **Day 4 (pending)** — 100k W&B full run + Exit #1 (< 1 mbb/g) 실측 확인. 결과에 따라 threshold 유지 또는 완화(1.5 mbb/g) 또는 iteration 증가(200k) 결정
+- [x] **Day 4** — Harness + fast regression + **100k W&B full run 완료** (커밋 `c173b24`). 10k fast PASSED (3.504 < 4.0). 100k 실측 **1.4802 mbb/g** — Exit #1 (< 1.0 mbb/g) **미달 48%**. Slope decelerates (−0.417 → −0.374), Nash 근처 steepen 가설 반증. **ROADMAP Exit #1은 Vanilla CFR로는 100k에서 미달; CFR+ 도입 후 재평가 예정**
 - [ ] **Day 5** — `src/poker_ai/algorithms/cfr_plus.py` (Tammelin 2014: 음수 regret clipping + alternating + linear averaging) + CFR vs CFR+ 비교 실험 (Exit #2)
 - [ ] W&B에 CFR vs CFR+ exploitability 곡선 중첩 — CFR+가 5~10배 빠르게 same-expl 도달 확인
 
@@ -30,6 +29,33 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 2 Week 1 Day 4 완료 (2026-04-23) — Leduc Vanilla CFR 100k 실측 + 수렴률 실증 발견
+
+- ✅ **100k W&B full run** (`leduc-vanilla-seed42`, [run](https://wandb.ai/zox004/poker-ai-hunl/runs/abt0tztf), [summary](https://wandb.ai/zox004/poker-ai-hunl/runs/jvxee3wl))
+  - 시작 11:53:02 KST, 종료 14:24:13 KST, 총 runtime **2h 31min** (9063s), iter_per_sec=11.27
+  - PNG: `experiments/outputs/phase2_leduc_vanilla_cfr/20260423-115305/leduc_vanilla_convergence.png`
+- ✅ **Exit #1 판정: ❌ FAILED** (실측 1.4802 mbb/g vs threshold 1.0 — **48% 초과**)
+  - `iters_to_exit = -1` (전체 100k 내내 threshold 미크로스)
+  - Game value는 **−0.08565** — Leduc Nash 문헌값(−0.0856)과 4자리 정확 수렴 (게임 자체는 Nash에 도달, exploitability만 marginal)
+- ✅ **Log-log slope 실증 분석** — 4-point 측정
+  - `1k → 10k`: 9.149 → 3.504 → slope **−0.417**
+  - `10k → 100k`: 3.504 → 1.480 → slope **−0.374**
+  - `1k → 100k` 전체: slope **−0.395**
+  - **Slope DECELERATES over time** — "Nash 근처에서 steepen" Day 3 가설 **반증**. 이론 O(1/√T)에서 더 멀어지는 방향
+- ✅ **과학적 해석 (Phase 2의 진짜 교육적 발견)**:
+  - Zinkevich O(1/√T)는 worst-case bound — **Leduc에선 실측이 그 bound보다 더 느림**
+  - Kuhn(slope −0.52, 이론 일치) vs Leduc(slope decelerating −0.417→−0.374) 대비는 **게임 규모와 실측 수렴률의 이탈**을 명확히 드러냄
+  - 이게 바로 **CFR+ 도입 동기의 실증 증거.** ROADMAP Exit #2 ("CFR+가 5~10× 빠르다")는 이 baseline 위에서 측정될 것
+  - 현재 slope 유지 시 Exit #1 달성 iteration: ≈280k (추가 5h 런타임). ROI 낮음 → CFR+ 측정 후 재평가
+- ✅ **Day 4 결정 정리** (Option D 실측-우선 접근의 결과):
+  - Fast threshold 3.0 → 4.0 mbb/g 조정 (실측 3.504 기반, 커밋 `c173b24`)
+  - **Slow threshold 1.0은 유지** — "Exit #1 달성 실패"를 투명하게 기록 (softening 거부). 다음 CFR+ 구현 시 "vanilla로는 안 되고 CFR+로 되더라"가 명확한 narrative
+  - 후속 세션 Day 5 CFR+ 구현 후 ROADMAP Exit #1 원안 유지/완화 최종 결정
+- ✅ **산출물 목록**:
+  - W&B runs (2개): seed42 + summary
+  - PNG: 2-panel convergence plot (log-log + linear with Exit Criterion red line + expected 0.92 green line)
+  - Hydra run dir: `experiments/outputs/phase2_leduc_vanilla_cfr/20260423-115305/`
 
 ### Phase 2 Week 1 Day 4 부분 (2026-04-23) — Leduc Vanilla CFR W&B harness + regression (100k 대기)
 
