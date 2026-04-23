@@ -232,6 +232,7 @@ class LeducPoker:
     """Leduc Hold'em game API: static factories and terminal utility dispatch."""
 
     NUM_ACTIONS: int = 3
+    ENCODING_DIM: int = 13  # Phase 3 Day 1 — see encode() layout
 
     @staticmethod
     def all_deals() -> tuple[tuple[int, int, int], ...]:
@@ -307,3 +308,38 @@ class LeducPoker:
         if p2_rank > p1_rank:
             return -float(p1_total)
         return 0.0
+
+    @staticmethod
+    def encode(state: LeducState) -> np.ndarray:
+        """Acting-player-perspective encoding (shape ``(13,)``, float32).
+
+        Layout::
+
+            [0-2]  hole rank one-hot (J/Q/K)          — acting player's card
+            [3-5]  board rank one-hot (J/Q/K)         — all-zero while round 1
+            [6]    1.0 if board not revealed (round 1)
+            [7-8]  round one-hot (round 1 / round 2)
+            [9]    len(round_history[0]) / 4.0
+            [10]   raise_count(round_history[0]) / 2.0
+            [11]   len(round_history[1]) / 4.0
+            [12]   raise_count(round_history[1]) / 2.0
+
+        Uniqueness for all 288 reachable infosets: own_card (3) × round (2) ×
+        round-1 shape × board-rank × round-2 shape separate them. Verified by
+        DFS test.
+        """
+        out = np.zeros(LeducPoker.ENCODING_DIM, dtype=np.float32)
+        hole = state.private_cards[state.current_player]
+        out[hole // 2] = 1.0
+        if state.board_card is None:
+            out[6] = 1.0
+        else:
+            out[3 + state.board_card // 2] = 1.0
+        out[7 + state.round_idx] = 1.0
+        r1 = state.round_history[0]
+        r2 = state.round_history[1]
+        out[9] = len(r1) / 4.0
+        out[10] = sum(1 for a in r1 if a == LeducAction.RAISE) / 2.0
+        out[11] = len(r2) / 4.0
+        out[12] = sum(1 for a in r2 if a == LeducAction.RAISE) / 2.0
+        return out

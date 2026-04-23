@@ -111,6 +111,7 @@ class KuhnPoker:
     NUM_PLAYERS = 2
     NUM_CARDS = 3
     NUM_ACTIONS: int = 2   # PASS, BET — Phase 2 GameProtocol conformance
+    ENCODING_DIM: int = 6  # Phase 3 Day 1 — see encode() layout
 
     # Six deals of 2 distinct cards from {J, Q, K}. Fixed order for determinism.
     _DEALS: tuple[tuple[int, int], ...] = (
@@ -126,6 +127,33 @@ class KuhnPoker:
     @staticmethod
     def state_from_deal(deal: tuple[int, int]) -> KuhnState:
         return KuhnState(deal=deal, history=())
+
+    @staticmethod
+    def encode(state: KuhnState) -> np.ndarray:
+        """Acting-player-perspective encoding (shape ``(6,)``, float32).
+
+        Layout::
+
+            [0-2]  own card one-hot (J/Q/K)
+            [3]    1.0 if len(history) >= 1
+            [4]    1.0 if history[0] == BET
+            [5]    1.0 if len(history) >= 2 and history[1] == BET
+
+        Uniqueness: the 4 non-terminal Kuhn histories (``""``, ``"p"``, ``"b"``,
+        ``"pb"``) map to distinct (d3, d4, d5) triples — combined with card
+        one-hot, all 12 infosets are pairwise distinct (see test).
+        """
+        out = np.zeros(KuhnPoker.ENCODING_DIM, dtype=np.float32)
+        own_card = state.deal[state.current_player]
+        out[own_card] = 1.0
+        h = state.history
+        if len(h) >= 1:
+            out[3] = 1.0
+            if h[0] == KuhnAction.BET:
+                out[4] = 1.0
+        if len(h) >= 2 and h[1] == KuhnAction.BET:
+            out[5] = 1.0
+        return out
 
     @staticmethod
     def terminal_utility(state: KuhnState) -> float:

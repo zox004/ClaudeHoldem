@@ -57,12 +57,20 @@ class GameProtocol(Protocol):
     Methods are declared with instance-method signatures, but a conforming
     implementation may use ``@staticmethod`` (both Kuhn and Leduc do so).
     Runtime ``isinstance`` checks only verify attribute presence.
+
+    ``ENCODING_DIM`` + ``encode`` were added in Phase 3 Day 1 to bridge
+    tabular CFR and neural function-approximating Deep CFR: the advantage
+    and strategy networks consume a fixed-dim numeric vector per infoset,
+    which :meth:`encode` produces from any non-terminal state.
     """
 
     NUM_ACTIONS: int
+    ENCODING_DIM: int
 
     def all_deals(self) -> tuple[Any, ...]: ...
 
     def state_from_deal(self, deal: Any) -> StateProtocol: ...
 
     def terminal_utility(self, state: StateProtocol) -> float: ...
+
+    def encode(self, state: StateProtocol) -> np.ndarray: ...
