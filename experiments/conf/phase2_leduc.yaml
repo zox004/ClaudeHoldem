@@ -1,0 +1,40 @@
+# @package _global_
+# Phase 2 Week 1 Day 4 — Leduc Hold'em Vanilla CFR convergence experiment.
+# Overrides:
+#   uv run python -m experiments.phase2_leduc_vanilla iterations=1000
+#   uv run python -m experiments.phase2_leduc_vanilla wandb.mode=disabled
+
+experiment_name: phase2_leduc_vanilla_cfr
+iterations: 100000
+seed: 42  # Single seed since Vanilla CFR is deterministic.
+          # Phase 2 MCCFR will parametrize seeds for sampling variance.
+n_actions: 3  # Leduc: FOLD, CALL, RAISE
+big_blind: 2.0  # Leduc round-1 bet size convention
+
+# Log cadence: mix of dense prefix (capture steep initial decay) and sparse tail.
+# Expected final ~0.9 mbb/g at 100k; decay is slow so sparse every 500 iter is fine.
+log_every: 500
+dense_prefix: 10   # iters 1..10 logged every step
+
+# Exit Criterion #1 (Phase 2 acceptance gate).
+exit_criterion_mbb: 1.0           # < 1 mbb/g after 100k iter (ROADMAP)
+expected_final_mbb: 0.92          # Theoretical O(1/√T) from 1k smoke (9.15/√100). Empirical
+                                  # slope measured at −0.417 (vs theoretical −0.5) between
+                                  # 1k→10k; projects to ~1.34 mbb/g @ 100k if slope persists.
+                                  # Slope may steepen toward Nash — the 100k run settles it.
+
+wandb:
+  project: poker-ai-hunl
+  tags: [phase2, leduc, vanilla-cfr]
+  mode: online       # set to "disabled" for pure local runs
+
+# Route every Hydra run to experiments/outputs/<experiment_name>/<timestamp>/
+# .gitignore already excludes outputs/ and multirun/.
+hydra:
+  run:
+    dir: experiments/outputs/${experiment_name}/${now:%Y%m%d-%H%M%S}
+  sweep:
+    dir: experiments/outputs/${experiment_name}/multirun/${now:%Y%m%d-%H%M%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false     # keep cwd = project root so relative imports work
