@@ -17,8 +17,8 @@
 - [x] `tests/unit/test_leduc.py` + `tests/regression/test_leduc_perfect_recall.py` — 71 tests GREEN (59 unit + 12 regression, 288 infoset 검증 포함) (커밋 `1fa143e`)
 - [x] `src/poker_ai/games/leduc.py` — Leduc Hold'em 엔진 (120 deals, 288 infosets, pot accounting rrf=-3/cc.rrf=-5) (커밋 `1fa143e`)
 - [x] **Day 2** — `src/poker_ai/games/protocol.py` (GameProtocol/StateProtocol, 커밋 `b99f914`) + `exploitability.py` game-agnostic 리팩토링 + **Pass 2 illegal-argmax 버그 수정** (커밋 `fe40ac6`) + `regret_matching` legal_mask 옵션 추가 (커밋 `f84cef6`). 305 tests GREEN, Ruff + mypy strict clean
-- [ ] **Day 3** — Leduc Vanilla CFR (재활용된 VanillaCFR를 GameProtocol로 일반화, 기존 Kuhn 수렴은 GREEN 유지)
-- [ ] **Day 4** — `tests/regression/test_leduc_vanilla_cfr_convergence.py` — Leduc Vanilla CFR 10만 iter에서 exploitability < 1 mbb/g (Exit #1)
+- [x] **Day 3** — Kuhn에 `legal_action_mask` 추가 (Option B) + StateProtocol 확장 (커밋 `0679cbc`) + VanillaCFR 루프 game-agnostic화 + InfosetData.legal_mask 캐시 + 규칙 3가지 masking invariant (커밋 `93e7e63`). 324 tests GREEN. Leduc 1k smoke: 288/288 infoset, expl=9.15 mbb/g, 10.8 iter/s
+- [ ] **Day 4** — `experiments/phase2_leduc_vanilla.py` + `conf/phase2_leduc.yaml` (W&B), 10k regression + 100k full run. Regression threshold ~3 mbb/g @ 10k (Phase 1 Kuhn 5 mbb/g 비율 고려), 100k full run이 Exit #1 (<1 mbb/g) 증명
 - [ ] **Day 5** — `src/poker_ai/algorithms/cfr_plus.py` (Tammelin 2014: 음수 regret clipping + alternating + linear averaging) + CFR vs CFR+ 비교 실험 (Exit #2)
 - [ ] W&B에 CFR vs CFR+ exploitability 곡선 중첩 — CFR+가 5~10배 빠르게 same-expl 도달 확인
 
@@ -29,6 +29,32 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 2 Week 1 Day 3 (2026-04-23) — VanillaCFR game-agnostic 리팩토링 (Leduc 학습 가능)
+
+- ✅ **2개 FAILING 테스트 파일 작성** (test-writer) — 19 tests RED (11 Kuhn mask + 8 Leduc CFR smoke)
+  - `tests/unit/test_kuhn_legal_action_mask.py`: shape/dtype, all-True invariant, legal_actions consistency (parametrize × 4)
+  - `tests/integration/test_vanilla_cfr_leduc_smoke.py`: instantiation, train smoke, **illegal slot probability = 0** invariant 3종 (current/average/sum-to-1)
+  - RED 확인: AttributeError(legal_action_mask 미구현) + ValueError("2 is not a valid KuhnAction")
+- ✅ **C1 커밋 `0679cbc`** — `KuhnState.legal_action_mask()` 추가 (shape (2,) all-True) + StateProtocol 확장
+  - Day 2의 `test_protocol_does_not_require_legal_action_mask` 테스트 의도 flip (Option B 결정 반영)
+  - Kuhn 193 GREEN + Leduc 71 GREEN + 37 mask/protocol GREEN = 316 passed
+- ✅ **C2 커밋 `93e7e63`** — VanillaCFR 전면 game-agnostic 리팩터
+  - `KuhnAction` import 완전 제거 — vanilla_cfr.py 순수 Protocol-dependent
+  - 루프: `for a_idx in range(n_actions)` → `for a in state.legal_actions()`
+  - `InfosetData.legal_mask` 캐시 필드 추가 (per-infoset, 첫 방문 시 state에서 읽음)
+  - `current_strategy`: `regret_matching(cumulative_regret, legal_mask=data.legal_mask)` — illegal slot 확률 0 강제
+  - `average_strategy` fallback uniform은 **legal 액션만** (mask_f / mask_f.sum())
+  - `instantaneous_regret *= mask_f` — illegal slot의 cumulative_regret drift 방지 (Kuhn no-op)
+  - `game_value()` 도 legal_actions iteration으로 재작성
+  - **수학 불변식**: 모든 visited infoset의 strategy에서 illegal slot = 정확히 0, strategy sum = 1.0 (probability measure integrity)
+- ✅ **Leduc 1k smoke run** (주변 실측) — 288/288 infoset 방문, exploitability = 9.15 mbb/g, game_value = −0.0887, 10.8 iter/s
+  - O(1/√T) 예측: 10k→2.89 mbb/g, 100k→0.92 mbb/g (Day 4 Exit #1 <1 mbb/g 달성 경계 확인)
+  - **성능 관측**: 100k iter 추정 ~2.5시간 (Python tree traversal 병목). Day 4는 "10k regression + 100k W&B full run" 분리 전략 필요
+- ✅ **설계 결정 기록**:
+  - Option B 채택 이유 재확인: Option C (CFR에서 mask 미사용) 는 fresh infoset에서 uniform-over-all → illegal 확률 1/3 → node_value sum < 1 (probability measure 붕괴). Kuhn에선 잠복, Leduc에서 활성 — Day 2 Pass 2 버그와 구조적으로 유사
+  - `InfosetData.legal_mask` per-infoset 캐시: state 매번 재계산 대신 첫 방문 시점에 저장. Perfect recall 정의 의해 infoset 내 모든 state가 동일 legal_actions → 안전
+  - Kuhn 행동 보존 검증: mask가 all-True → 모든 masking 곱셈 no-op → Kuhn 193 tests 100% GREEN 유지가 이를 자동 증명
 
 ### Phase 2 Week 1 Day 2 (2026-04-23) — Protocol 추출 + exploitability 일반화 + Pass 2 버그 수정
 
