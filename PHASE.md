@@ -16,7 +16,7 @@
 - [x] **Leduc 엔진 설계 논의 확정** — 4가지 결정 확정 (CFR+만, 직접 구현, External Sampling, 3-pass BR 재사용) + Q2 세부 (IntEnum FCR, 120 deals, reach_opp=1/120, @property 파생, regret_matching legal_mask 옵션)
 - [x] `tests/unit/test_leduc.py` + `tests/regression/test_leduc_perfect_recall.py` — 71 tests GREEN (59 unit + 12 regression, 288 infoset 검증 포함) (커밋 `1fa143e`)
 - [x] `src/poker_ai/games/leduc.py` — Leduc Hold'em 엔진 (120 deals, 288 infosets, pot accounting rrf=-3/cc.rrf=-5) (커밋 `1fa143e`)
-- [ ] **Day 2** — `src/poker_ai/games/protocol.py` (GameProtocol/StateProtocol) + `exploitability.py` game-agnostic 리팩토링 + `regret_matching` legal_mask 옵션 추가 (Kuhn 193 + Leduc 71 GREEN 유지)
+- [x] **Day 2** — `src/poker_ai/games/protocol.py` (GameProtocol/StateProtocol, 커밋 `b99f914`) + `exploitability.py` game-agnostic 리팩토링 + **Pass 2 illegal-argmax 버그 수정** (커밋 `fe40ac6`) + `regret_matching` legal_mask 옵션 추가 (커밋 `f84cef6`). 305 tests GREEN, Ruff + mypy strict clean
 - [ ] **Day 3** — Leduc Vanilla CFR (재활용된 VanillaCFR를 GameProtocol로 일반화, 기존 Kuhn 수렴은 GREEN 유지)
 - [ ] **Day 4** — `tests/regression/test_leduc_vanilla_cfr_convergence.py` — Leduc Vanilla CFR 10만 iter에서 exploitability < 1 mbb/g (Exit #1)
 - [ ] **Day 5** — `src/poker_ai/algorithms/cfr_plus.py` (Tammelin 2014: 음수 regret clipping + alternating + linear averaging) + CFR vs CFR+ 비교 실험 (Exit #2)
@@ -29,6 +29,35 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 2 Week 1 Day 2 (2026-04-23) — Protocol 추출 + exploitability 일반화 + Pass 2 버그 수정
+
+- ✅ **3개 FAILING 테스트 파일 작성** (test-writer) — 총 41 tests RED
+  - `tests/unit/test_game_protocol.py` (26 tests): Kuhn + Leduc parametrized conformance, over-spec guards
+  - `tests/unit/test_regret_matching.py` +6 tests: `TestRegretMatchingLegalMask` 클래스 (legacy-compat, illegal 0, 3종 fallback, single-legal)
+  - `tests/integration/test_exploitability_leduc_smoke.py` (9 tests): finite, expl > 0, 범위 경계, BR lower bound, Kuhn regression guard
+  - RED 에러 형태: ModuleNotFoundError (Protocol) / TypeError (legal_mask) / IndexError (`opp_strat[int(a)]` — `_N_ACTIONS=2` 가정이 Leduc 3-action에 충돌, 정확히 버그 위치 지목)
+- ✅ **C1 커밋 `b99f914`** — `src/poker_ai/games/protocol.py` 신규 + Kuhn에 `NUM_ACTIONS = 2` 추가 (additive only)
+  - `@runtime_checkable` Protocol: StateProtocol (5 attrs) + GameProtocol (4 attrs)
+  - Over-spec 방지 확정: `legal_action_mask`, `private_cards`, `round_idx` 등 게임별 속성 전부 Protocol 제외
+  - 26/26 GREEN
+- ✅ **C2 커밋 `fe40ac6`** — exploitability game-agnostic + **Pass 2 illegal-argmax 버그 수정**
+  - Import KuhnPoker/KuhnState → GameProtocol/StateProtocol, `_N_ACTIONS = 2` → `game.NUM_ACTIONS`
+  - **핵심 버그 수정**: `cfv = np.zeros(NUM_ACTIONS)` + `argmax` 전체 → argmax over LEGAL only + action 객체 저장 (int index 아님)
+  - Kuhn에서는 no-op (모든 action legal), Leduc에서 활성 (bets=0에서 FOLD index 0이 cfv=0으로 argmax 1등 가능)
+  - vanilla_cfr.py 타입힌트만 교체, 루프 구조 + `KuhnAction(a_idx)` 호출 유지 (Day 3 범위)
+  - 버그 발견 트리거: "Kuhn 193 GREEN 유지 전제"로 Leduc 탑재 시 역행적 감사 → 버그 드러남
+- ✅ **C3 커밋 `f84cef6`** — `regret_matching(..., legal_mask=None)` 시그니처 확장
+  - 기존 호출 100% 호환 (legal_mask=None이 Phase 1 동작)
+  - legal_mask 경로: positive-part × mask → normalize. Fallback uniform은 **legal only**
+  - Day 3 Leduc CFR에서 소비 예정. Day 2에선 함수 확장만
+  - numpy 타입 추론 issue(`/scalar` returns Any)로 mypy strict 에러 3건 발생 → 타입 어노테이션 중간변수로 해결
+- ✅ **최종 Verification** — 305 tests GREEN (Kuhn 193 + Leduc 71 + Phase 2 Day 2 신규 41), Ruff + mypy strict clean on 6 refactored source files
+- ✅ **설계 결정 기록**:
+  - Protocol 위치 `src/poker_ai/games/protocol.py` 선택 (dedicated 모듈 — `__init__.py` 혼잡 방지)
+  - GameProtocol deal 타입 `Any`로 느슨하게 (TypeVar generic은 과공학)
+  - Commit 3분할: C1(Protocol) → C2(exploitability+bug) → C3(regret_matching). 의존성 방향 일치, 각 단계 독립 검증 가능
+  - vanilla_cfr.py는 타입/import만 교체 (루프 무수정), Day 3에서 Leduc-ready 루프로 재설계 예정
 
 ### Phase 2 Week 1 Day 1 (2026-04-23) — Leduc 엔진 구현
 
