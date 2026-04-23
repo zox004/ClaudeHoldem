@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 2 ✅ 완주 (2026-04-23, 하루), **Phase 3 Preview locked, 구현 대기**
+**Phase**: 3 진행 중 — **Day 1 Infrastructure 완료 (2026-04-23 저녁)**
 **Phase 2 Exit Criteria**: 3/3 PASS (#1 CFR+ 0.000287 / #2 5164× / #3 34×)
-**테스트**: 365 GREEN
-**Next**: 내일 새 세션에서 PHASE.md 읽고 Phase 3 Day 1 착수
+**테스트**: **415 GREEN** (Phase 2 끝 365 + Phase 3 Day 1 신규 51 ─ encode 21 + reservoir 14 + deep_cfr 16. 기존 일부 제거/재편 있을 수 있음; 실측 합 `pytest -m "not slow"` 364)
+**Next**: Day 2 — Kuhn Deep CFR 100-500 iter + correlation 측정 (기본 correctness 확인)
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +32,43 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 1 (2026-04-23 저녁) — Deep CFR Infrastructure 구축
+
+목표: encode + reservoir + networks + DeepCFR skeleton으로 **smoke test 통과**. 수렴 검증은 Day 2+.
+
+#### 산출물 (커밋 `e4e5df3`, `a5c9e6a`)
+
+| 컴포넌트 | 위치 | 책임 |
+|---|---|---|
+| `GameProtocol.encode()` | `src/poker_ai/games/protocol.py` | `ENCODING_DIM` + `encode(state) → np.ndarray[float32]` Protocol 확장 |
+| Kuhn encode() | `src/poker_ai/games/kuhn.py` | 6-dim: 카드 one-hot(3) + hist_len 플래그 + hist[0]_is_bet + hist[1]_is_bet |
+| Leduc encode() | `src/poker_ai/games/leduc.py` | 13-dim: hole(3) + board(3) + not_revealed + round(2) + (len, raise)/norm × 2라운드 |
+| `ReservoirBuffer` | `src/poker_ai/algorithms/reservoir.py` | Vitter 1985 + torch 프리얼로케이션 + scalar/vector target 양쪽 |
+| `AdvantageNet` / `StrategyNet` | `src/poker_ai/networks/{advantage,strategy}_net.py` | 3-layer × 64 MLP, ReLU, raw logit, Brown 2019 Leduc config |
+| `DeepCFR` | `src/poker_ai/algorithms/deep_cfr.py` | 외부 샘플링 traversal (MCCFR 80% 재사용) + per-player advantage buffer + 공유 strategy buffer + Adam lr=1e-3 + grad clip 10.0 (A2) + Linear CFR loss-side weighting (#5) + from-scratch reinit per iter (#4) |
+
+#### Tests (51 신규, 모두 GREEN)
+
+- **21 encode** (`test_encode.py`): shape/dtype/determinism + **12/288 infoset distinctness** + Protocol conformance
+- **14 reservoir** (`test_reservoir_buffer.py`): basic bookkeeping + Vitter property (retention rate ≈ cap/total, bucket uniform, no-dup, 100-seed MC, determinism)
+- **16 deep_cfr smoke** (`test_deep_cfr_smoke.py`): instantiation + per-player advantage nets + shared strategy net + seed-fixed init + 1-iter end-to-end + forward/backward gradient flow + finite-params invariant
+
+`uv run pytest tests/unit tests/integration -m "not slow"` → **364 passed, 3m10s**. Ruff + mypy strict clean on 7 source files.
+
+#### 설계 포인트
+
+1. **Kuhn 6 vs Leduc 13 encoding 둘 다 infoset-unique** (12/288 distinct tensor 실측) — 아무 무작위 encoding이 아니라 perfect recall 보장
+2. **ReservoirBuffer target 지원 확장**: 기존 `target: float` scalar API 100% 보존 (14 Vitter tests GREEN) + Deep CFR용 vector target (`target_dim=n_actions`) 추가 → regret/strategy 벡터 저장 가능
+3. **Per-player advantage + shared strategy** (Brown 2019 §3 패턴) — 결정 #6 "strategy net Day 1부터" 반영
+4. **Traversal 구조는 MCCFR ES 80% 재사용** — 변경점 2곳: (a) tabular `cumulative_regret` → `advantage_nets[p]` forward, (b) in-place update → reservoir push. 나머지 (ε-smoothing, importance weighting 없는 updating-player enumerate) 그대로
+
+#### 다음 (Day 2)
+
+- Kuhn 100-500 iter 학습 → **correlation(tabular_R⁺, advantage_net_output) 측정** (Exit #4 primary 연습판)
+- 실제 regret 값 sign/magnitude가 tabular CFR과 일치하는지 sanity
+
+---
 
 ### Phase 3 Deep CFR Preview — Design Lock (2026-04-23)
 
