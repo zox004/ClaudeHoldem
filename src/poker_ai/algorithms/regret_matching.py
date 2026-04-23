@@ -12,29 +12,53 @@ from __future__ import annotations
 import numpy as np
 
 
-def regret_matching(cumulative_regret: np.ndarray) -> np.ndarray:
+def regret_matching(
+    cumulative_regret: np.ndarray,
+    legal_mask: np.ndarray | None = None,
+) -> np.ndarray:
     """Convert cumulative regrets to a strategy (probability distribution).
 
     Hart & Mas-Colell 2000; Neller & Lanctot 2013 Algorithm 1.
 
-    Rule:
+    Base rule (``legal_mask=None``, Phase 1 Kuhn-compatible path):
         positive = max(cumulative_regret, 0)
         if sum(positive) > 0:  strategy = positive / sum(positive)
-        else:                  strategy = uniform
+        else:                  strategy = uniform over all actions
+
+    With ``legal_mask`` (Phase 2 Leduc path for state-dependent legality):
+        positive = max(cumulative_regret, 0) * legal_mask
+        if sum(positive) > 0:  strategy = positive / sum(positive)
+        else:                  strategy = uniform over LEGAL actions only
+    Illegal slots always receive probability 0, regardless of any positive
+    regret they may have accumulated by accident.
 
     Args:
         cumulative_regret: 1-D array of per-action cumulative regrets.
+        legal_mask: Optional boolean mask of same length. If supplied, must
+            have at least one ``True`` entry.
 
     Returns:
         Probability distribution with the same shape as the input. Entries
-        are non-negative and sum to 1.
+        are non-negative and sum to 1. When a ``legal_mask`` is supplied,
+        illegal slots are exactly zero.
     """
     regret = np.asarray(cumulative_regret, dtype=np.float64)
     positive = np.maximum(regret, 0.0)
+    if legal_mask is not None:
+        mask_f = np.asarray(legal_mask, dtype=np.float64)
+        positive = positive * mask_f
     total = positive.sum()
     if total > 0.0:
-        return positive / total
-    return np.ones_like(regret) / regret.size
+        strategy: np.ndarray = positive / total
+        return strategy
+    if legal_mask is not None:
+        mask_f = np.asarray(legal_mask, dtype=np.float64)
+        n_legal = mask_f.sum()
+        assert n_legal > 0, "legal_mask must have at least one True entry"
+        fallback_legal: np.ndarray = mask_f / n_legal
+        return fallback_legal
+    fallback_uniform: np.ndarray = np.ones_like(regret) / regret.size
+    return fallback_uniform
 
 
 class RegretMatcher:
@@ -82,5 +106,9 @@ class RegretMatcher:
         """
         total = self._cumulative_strategy.sum()
         if total > 0.0:
-            return self._cumulative_strategy / total
-        return np.ones(self.n_actions, dtype=np.float64) / self.n_actions
+            normalized: np.ndarray = self._cumulative_strategy / total
+            return normalized
+        uniform: np.ndarray = (
+            np.ones(self.n_actions, dtype=np.float64) / self.n_actions
+        )
+        return uniform
