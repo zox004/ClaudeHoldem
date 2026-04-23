@@ -73,6 +73,30 @@
 
 Day 5 CFR+에서도 unit test 12개 PASS하는데 Leduc 수렴 실패 → 1-iter snapshot audit → synchronous regret update 버그 확증 → fix 후 Tammelin Fig 2 재현. **Day 6 MCCFR도 같은 패턴**: 초기 impl 10 unit PASS + unbiasedness test FAIL → numerical audit (1/q vs σ/q, reach_i 누락) → 수정 후 Kuhn 10k 268 → 12 mbb/g 정상화. 이 "audit-기반 검증" 프로세스가 Phase 2의 실무 자산.
 
+### Phase 2 Week 1 Day 5 complete (2026-04-23) — CFR+ 100k Exit #1+#2 PASS
+
+#### 100k Full Run 실측 (W&B: [leduc-cfr-plus-seed42](https://wandb.ai/zox004/poker-ai-hunl/runs/2r2a3m28))
+
+| 지표 | 실측 | 판정 |
+|---|---|---|
+| final_exploitability_mbb | **0.000287** | — |
+| **Exit #1** (<1.0 mbb/g) | 3482× margin | ✅ PASS |
+| **Exit #2** (5-10× speedup) | **5164× speedup** vs Vanilla 100k | ✅ PASS (목표 516× 초과) |
+| game_value | **−0.085606** | Nash −0.0856과 6자리 일치 |
+| iters_to_exit | 2000 | CFR+가 겨우 2k iter에 Vanilla 100k(1.48) 돌파 |
+| Runtime | 2h 43min (9799s) | |
+| PNG | `experiments/outputs/phase2_leduc_cfr_plus/20260423-193735/leduc_cfr_plus_convergence.png` | |
+
+#### O(1/T) 수렴률 실증
+
+| iter | Expl (mbb/g) | Speedup vs Vanilla-100k |
+|---|---|---|
+| 1k | 0.121 | 12× |
+| 10k | 0.00376 | 394× |
+| 100k | 0.000287 | **5164×** |
+
+10× iter → 13-32× expl 감소. Vanilla O(1/√T)의 slope ≈ −0.5 대비 CFR+ O(1/T) slope ≈ −1에 근접 (실측 −1.15, −1.12). **지수적 개선 실증**.
+
 ### Phase 2 Week 1 Day 5 (2026-04-23) — CFR+ (Tammelin 2014) 구현 + audit 기반 버그 수정
 
 - ✅ **설계 7 결정 확정**: CFRPlus가 VanillaCFR 상속 + 2개 hook override (regret clipping + linear averaging). Alternating updates는 Vanilla A-pattern 그대로
