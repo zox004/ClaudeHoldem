@@ -27,6 +27,8 @@ from __future__ import annotations
 from enum import IntEnum
 from typing import Any, Protocol, runtime_checkable
 
+import numpy as np
+
 
 @runtime_checkable
 class StateProtocol(Protocol):
@@ -42,6 +44,8 @@ class StateProtocol(Protocol):
     def infoset_key(self) -> str: ...
 
     def legal_actions(self) -> tuple[IntEnum, ...]: ...
+
+    def legal_action_mask(self) -> np.ndarray: ...
 
     def next_state(self, action: IntEnum) -> StateProtocol: ...
 

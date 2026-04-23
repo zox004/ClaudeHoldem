@@ -52,6 +52,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 
+import numpy as np
+
 _RANK_CHARS = "JQK"
 
 
@@ -93,6 +95,13 @@ class KuhnState:
 
     def legal_actions(self) -> tuple[KuhnAction, ...]:
         return (KuhnAction.PASS, KuhnAction.BET)
+
+    def legal_action_mask(self) -> np.ndarray:
+        """Bool mask over PASS, BET. All actions always legal in Kuhn; included
+        for :class:`poker_ai.games.protocol.StateProtocol` conformance so that
+        game-agnostic CFR can pass the mask through ``regret_matching`` without
+        hasattr branching."""
+        return np.ones(KuhnPoker.NUM_ACTIONS, dtype=bool)
 
     def next_state(self, action: KuhnAction) -> "KuhnState":
         return KuhnState(deal=self.deal, history=self.history + (action,))

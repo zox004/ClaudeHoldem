@@ -221,18 +221,18 @@ class TestStateProtocolConformance:
 # conform, defeating the refactor.
 # -----------------------------------------------------------------------------
 class TestProtocolIsNotOverSpecified:
-    def test_protocol_does_not_require_legal_action_mask(self) -> None:
-        """``legal_action_mask`` is Leduc-specific — it must NOT be on StateProtocol."""
+    def test_protocol_requires_legal_action_mask(self) -> None:
+        """``legal_action_mask`` is in StateProtocol (Phase 2 Day 3 Option B
+        decision: Kuhn got a trivial all-True mask so CFR can rely on this
+        method uniformly. Test intentionally flipped from Day 2's 'must NOT
+        require' to lock in the new design contract)."""
         from poker_ai.games.protocol import StateProtocol
 
-        # Protocols expose their declared attrs via __annotations__ or as
-        # class-level attributes. We check both the class namespace and
-        # its annotations to be robust against either declaration style.
         protocol_attrs = set(vars(StateProtocol).keys()) | set(
             getattr(StateProtocol, "__annotations__", {}).keys()
         )
-        assert "legal_action_mask" not in protocol_attrs, (
-            "StateProtocol must not require legal_action_mask (Kuhn would break)"
+        assert "legal_action_mask" in protocol_attrs, (
+            "StateProtocol must require legal_action_mask — Day 3 Option B"
         )
 
     def test_protocol_does_not_require_private_cards(self) -> None:
