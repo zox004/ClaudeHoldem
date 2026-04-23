@@ -258,17 +258,33 @@ class VanillaCFR:
         # the updating player (alternating one-player traversal).
         if acting_player == updating_player:
             # Counterfactual regret: r(I, a) = π_{-i}(h) · (v_σ(I·a) - v_σ(I))
-            # Neller & Lanctot 2013 Alg. 2, line 11. Stored RAW — positive-part
-            # clipping deferred to current_strategy() per Eq. (5).
-            # Mask illegal slots to prevent negative-regret drift on them.
-            # Kuhn: legal_mask all True, multiplication is a no-op (behavior
-            # preserved). Leduc: illegal slots get 0 regret update.
+            # Neller & Lanctot 2013 Alg. 2, line 11. Mask illegal slots to
+            # prevent negative-regret drift on them (Kuhn no-op; Leduc active).
             mask_f = self.infosets[key].legal_mask.astype(np.float64)
             instantaneous_regret = reach_opp * (action_values - node_value) * mask_f
-            self.infosets[key].cumulative_regret += instantaneous_regret
-            # Reach-weighted cumulative strategy: s(I, a) += π_i(h) · σ(I, a)
-            # Neller & Lanctot 2013 Alg. 2, line 12. strategy[illegal] = 0
-            # already (from masked regret_matching), so no extra masking.
-            self.infosets[key].cumulative_strategy += reach_i * strategy
+            self._update_regret(key, instantaneous_regret)
+            # Reach-weighted cumulative strategy: Neller & Lanctot 2013 Alg. 2
+            # line 12. strategy[illegal] = 0 already (from masked regret_matching).
+            self._update_strategy(key, reach_i, strategy)
 
         return node_value
+
+    # ------------------------------------------------ update hooks (Day 5)
+
+    def _update_regret(self, key: str, instantaneous_regret: np.ndarray) -> None:
+        """Vanilla CFR regret accumulation: raw storage (no clipping).
+
+        Positive-part clipping is deferred to strategy-computation time via
+        :func:`regret_matching`. CFR+ (Tammelin 2014) overrides this hook
+        to clip at storage time instead.
+        """
+        self.infosets[key].cumulative_regret += instantaneous_regret
+
+    def _update_strategy(
+        self, key: str, reach_i: float, strategy: np.ndarray
+    ) -> None:
+        """Vanilla CFR cumulative strategy: unweighted reach-probability sum.
+
+        CFR+ overrides this hook to apply linear averaging (weight by iter t).
+        """
+        self.infosets[key].cumulative_strategy += reach_i * strategy
