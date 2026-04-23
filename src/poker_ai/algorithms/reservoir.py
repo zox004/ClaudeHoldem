@@ -49,10 +49,12 @@ class ReservoirBuffer:
         device: str = "cpu",
         seed: int = 0,
         target_dim: int = 1,
+        mask_dim: int = 0,
     ) -> None:
         self.capacity = capacity
         self.feature_dim = feature_dim
         self.target_dim = target_dim
+        self.mask_dim = mask_dim
         self.device = torch.device(device)
         self._features: torch.Tensor = torch.zeros(
             (capacity, feature_dim), dtype=torch.float32, device=self.device
@@ -72,6 +74,15 @@ class ReservoirBuffer:
         self._weights: torch.Tensor = torch.zeros(
             (capacity,), dtype=torch.float32, device=self.device
         )
+        # Optional legal-action mask storage (Phase 3 Day 2 — strategy net
+        # cross-entropy training requires per-sample legal masks because
+        # ``target == 0`` is ambiguous between "illegal" and "legal but
+        # pure-strategy zero-probability").
+        self._masks: torch.Tensor | None = None
+        if mask_dim > 0:
+            self._masks = torch.zeros(
+                (capacity, mask_dim), dtype=torch.bool, device=self.device
+            )
         self.total_seen: int = 0
         self._rng = np.random.default_rng(seed)
 
@@ -83,6 +94,7 @@ class ReservoirBuffer:
         features: torch.Tensor,
         target: float | torch.Tensor,
         iter_weight: float,
+        mask: torch.Tensor | None = None,
     ) -> None:
         """Vitter Algorithm R insertion.
 
@@ -90,7 +102,8 @@ class ReservoirBuffer:
         ``j ∈ [0, total_seen]``; if ``j < capacity``, evict slot ``j``.
 
         ``target`` is a ``float`` when ``target_dim == 1`` and a 1D
-        ``torch.Tensor`` of length ``target_dim`` otherwise.
+        ``torch.Tensor`` of length ``target_dim`` otherwise. ``mask`` (optional,
+        only when ``mask_dim > 0``) is a bool tensor of length ``mask_dim``.
         """
         k = self.total_seen
         if k < self.capacity:
@@ -112,6 +125,9 @@ class ReservoirBuffer:
             )
             self._targets[slot] = target.to(dtype=torch.float32, device=self.device)
         self._weights[slot] = float(iter_weight)
+        if self._masks is not None:
+            assert mask is not None, "buffer was constructed with mask_dim>0; mask required"
+            self._masks[slot] = mask.to(dtype=torch.bool, device=self.device)
         self.total_seen += 1
 
     def sample_all(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -126,4 +142,21 @@ class ReservoirBuffer:
             self._features[:n],
             self._targets[:n],
             self._weights[:n],
+        )
+
+    def sample_all_with_masks(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return all retained samples including legal-action masks.
+
+        Only valid when the buffer was constructed with ``mask_dim > 0``.
+        ``AssertionError`` otherwise.
+        """
+        assert self._masks is not None, "buffer was not constructed with mask_dim>0"
+        n = len(self)
+        return (
+            self._features[:n],
+            self._targets[:n],
+            self._weights[:n],
+            self._masks[:n],
         )

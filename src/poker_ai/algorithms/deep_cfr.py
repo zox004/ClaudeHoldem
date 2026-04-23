@@ -115,12 +115,16 @@ class DeepCFR:
             )
             for p in (0, 1)
         }
+        # Strategy buffer stores legal masks too — cross-entropy training
+        # needs them (target==0 is ambiguous between "illegal" and "pure
+        # strategy zero"). Phase 3 Day 2 fix.
         self.strategy_buffer: ReservoirBuffer = ReservoirBuffer(
             capacity=buffer_capacity,
             feature_dim=encoding_dim,
             device=device,
             seed=seed + 3,
             target_dim=n_actions,
+            mask_dim=n_actions,
         )
 
         self.iteration: int = 0
@@ -201,16 +205,19 @@ class DeepCFR:
             )
             return node_value
 
-        # Non-updating player: (a) push strategy sample, (b) single-action
+        # Non-updating player: (a) push strategy sample (with legal mask for
+        # cross-entropy training — Phase 3 Day 2 fix), (b) single-action
         # external sample via ε-smoothed distribution.
         encoding_t = torch.from_numpy(encoding_np).to(self.device)
         strategy_t = torch.from_numpy(
             strategy.astype(np.float32)
         ).to(self.device)
+        mask_t = torch.from_numpy(legal_mask.astype(bool)).to(self.device)
         self.strategy_buffer.add(
             features=encoding_t,
             target=strategy_t,
             iter_weight=float(self.iteration),
+            mask=mask_t,
         )
 
         smoothed = self._epsilon_smoothed(strategy, mask_f)
@@ -292,12 +299,19 @@ class DeepCFR:
                 optimizer.step()
 
     def _train_strategy_net(self) -> None:
-        """Re-init + fit ``strategy_net`` on ``strategy_buffer``.
+        """Re-init + fit ``strategy_net`` on ``strategy_buffer`` via
+        soft-target **cross-entropy** with legal-action masking.
 
-        Target is the raw strategy vector σ^T observed at non-updating
-        player decision nodes. Cross-entropy vs. simplex target would also
-        work; we use per-sample weighted MSE for architectural symmetry with
-        the advantage net.
+        Phase 3 Day 2 fix (2026-04-24): replaced MSE with cross-entropy
+        after smoke revealed MSE collapses to smoothed middle values
+        (output range ~[0.3, 0.7]) and fails on pure-strategy infosets
+        where CFR+ σ̄ has Nash-style extremes (0.0 / 1.0). Cross-entropy
+        has stronger gradient pressure on extreme targets.
+
+        Loss (per sample, averaged over batch):
+            ``- Σ_a target[a] · log softmax(logits_masked)[a]``
+        where ``logits_masked[a] = logits[a] if legal else -inf`` so that
+        softmax assigns exactly 0 probability to illegal actions.
         """
         buf = self.strategy_buffer
         n = len(buf)
@@ -310,21 +324,34 @@ class DeepCFR:
         net = self.strategy_net
         optimizer = torch.optim.Adam(net.parameters(), lr=_LEARNING_RATE)
 
-        features, targets, weights = buf.sample_all()
+        features, targets, weights, masks = buf.sample_all_with_masks()
         batch = min(self.batch_size, n)
+        neg_inf = torch.tensor(float("-inf"), device=self.device)
         for _ in range(self.strategy_epochs):
             perm = torch.randperm(n, device=self.device)
             for start in range(0, n, batch):
                 idx = perm[start:start + batch]
                 x_b = features[idx]
-                y_b = targets[idx]
+                y_b = targets[idx]      # (B, n_actions) — prob simplex
                 w_b = weights[idx]
+                m_b = masks[idx]        # (B, n_actions) — bool legal mask
 
-                pred = net(x_b)
-                per_sample = ((pred - y_b) ** 2).mean(dim=1)
-                loss = (per_sample * w_b).mean()
+                logits = net(x_b)                         # (B, n_actions) raw
+                # Legal-mask the logits by subst. -inf on illegal slots.
+                masked = torch.where(m_b, logits, neg_inf)
+                log_probs = torch.nn.functional.log_softmax(masked, dim=-1)
+                # Soft-target cross-entropy: -Σ target[a] · log_probs[a].
+                # target[a] = 0 on illegal by construction; 0 · -inf is
+                # guarded by ``nan_to_num`` to handle any residual noise.
+                terms = torch.where(
+                    y_b > 0.0,
+                    y_b * log_probs,
+                    torch.zeros_like(y_b),
+                )
+                per_sample_ce = -terms.sum(dim=-1)
+                loss = (per_sample_ce * w_b).mean()
 
                 optimizer.zero_grad()
-                loss.backward()
+                loss.backward()  # type: ignore[no-untyped-call]
                 nn.utils.clip_grad_norm_(net.parameters(), _GRAD_CLIP_NORM)
                 optimizer.step()
