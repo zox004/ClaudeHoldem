@@ -5,12 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 2 (Leduc Hold'em — CFR+, MCCFR) — **✅ 완주 (2026-04-23, 하루)**
-**시작일**: 2026-04-23
-**완료일**: 2026-04-23 (예상 2주 → 실제 1일)
-**Exit Criteria**: 3/3 PASS (#1 CFR+ 0.000287 / #2 5164× / #3 34×)
+**Phase**: 2 ✅ 완주 (2026-04-23, 하루), **Phase 3 Preview locked, 구현 대기**
+**Phase 2 Exit Criteria**: 3/3 PASS (#1 CFR+ 0.000287 / #2 5164× / #3 34×)
 **테스트**: 365 GREEN
-**Next**: Phase 3 Deep CFR (별도 세션)
+**Next**: 내일 새 세션에서 PHASE.md 읽고 Phase 3 Day 1 착수
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -34,6 +32,76 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Deep CFR Preview — Design Lock (2026-04-23)
+
+Phase 2 완주 후 멘토+Claude co-review로 설계 확정. 구현 착수는 내일 새 세션.
+
+#### 7 결정 (audit-기반 수정 반영)
+
+1. **Input encoding**: Flat one-hot + game-specific `encode(state) → Tensor[n_features]`
+   - Leduc 13dim (hole 3 + board 4 + round 2 + betting_hist 4), Kuhn 6dim
+   - GameProtocol 확장 (A3)
+
+2. **Advantage Network**: 3 layer × 64 MLP, ReLU, raw logit output (Brown 2019 Leduc config)
+
+3. **Reservoir Buffer**: Torch tensor size 1M + growth curve 로깅
+   - Vitter 1985 reservoir sampling
+   - `len(buffer)/T` 로그로 regime shift 감지 (Day 5 sync drift 패턴 가드)
+
+4. **학습 Schedule**: From-scratch reinit (원안) + **conditional warm-start fallback**
+   - Batch 10k, ~4 epochs, Adam lr=1e-3
+   - Day 4 Exit #4 미달 시 warm-start 전환 판단 (미리 고정 않음)
+   - iter별 training loss curve 로깅 (under-training 감지)
+
+5. **Linear CFR Weighting** (loss-side sample weight) + **audit test 필수**
+   - `loss = Σ (iter_i / T) · (network(I_i) - regret_i)²`
+   - Buffer는 iter 완료 후에만 갱신 (within-iter target drift 방지 — Day 5 패턴)
+   - **Phase 2 Day 6 unbiasedness 패턴 이식** (200+ seed-equiv + hand-computed weighted avg vs network output, rel_err < 10%)
+
+6. **Strategy Network** — Day 1부터 advantage + strategy **둘 다** (원안 연기 REJECT)
+   - 이유: σ̄ (time-averaged) 수렴 보장은 Deep CFR 이론 핵심; σ^T (last iter)만으론 oscillate 가능 → Exit #4 평가 근거 무너짐
+   - Reservoir 2개 (advantage/strategy 각각) 또는 1개 공유 — Day 1 구현 시 결정
+   - **Exit #4 평가는 σ̄ exploitability 기준**, σ^T는 diagnostic only
+
+7. **Exit Criteria** (현실 수정)
+   - **Exit #4 primary**: `correlation(tabular_R⁺, network_output) > 0.95` — Deep CFR correctness 직접 근거, absolute expl보다 신뢰 높음
+   - **Exit #4 secondary**: Leduc σ̄ expl < **0.1 mbb/g** (Brown 2019 Fig 2 범위; 0.003은 function-approx floor 고려 비현실)
+   - **Exit #5**: Leduc σ̄ expl < 1.0 mbb/g (Vanilla baseline 이김)
+   - **Stretch**: < 0.01 mbb/g
+
+#### 추가 5 결정 (Review에서 발견)
+
+- **A1**. Traversals per CFR iter `K = 1000` (Leduc 시작값)
+- **A2**. `torch.nn.utils.clip_grad_norm_(params, 10.0)` — advantage target range가 chip 단위 O(10) 가능
+- **A3**. `encode(state) → Tensor` 인터페이스 — GameProtocol에 추가 or game-specific helper
+- **A4**. σ̄ 평가: strategy network 사용 (결정 6 결과)
+- **A5**. **Unbiasedness audit test** — Phase 2 Day 6 패턴을 Deep CFR loss weighting 검증에 이식
+
+#### Day Scope (예상 2주, Phase 2처럼 1일 단축 불가)
+
+| Day | 목표 |
+|---|---|
+| 1 | Infrastructure: encode() + advantage/strategy nets + reservoir + Kuhn/Leduc smoke |
+| 2 | Kuhn Deep CFR 100-500 iter + correlation 측정 (기본 correctness 확인) |
+| 3 | Leduc 1k smoke + **first audit (A5 unbiasedness test)** |
+| 4 | Leduc 10k + **Exit #4 primary 판정** (correlation > 0.95) |
+| 5-6 (Week 2) | 10k 통과 시 100k + Exit #4 secondary (<0.1 mbb/g) 판정 |
+
+Neural training debug cost가 상수 비용이라 Phase 2 급 단축 불가. 2주 reasonable.
+
+#### Phase 2 → Phase 3 상속
+
+- **Code 재사용**: MCCFR External Sampling traversal 80% (`src/poker_ai/algorithms/mccfr.py`)
+- **Type 확장**: GameProtocol에 `encode()` 추가
+- **Audit 4단 패턴** (Phase 3 업그레이드):
+  1. Unit tests (invariants: shape, non-neg, sum-to-1)
+  2. Many-seed unbiasedness (stochastic methods — Day 6 패턴)
+  3. 1-iter hand-computed snapshot (deterministic methods — Day 5 패턴)
+  4. **(신규) Tabular ground truth correlation** (Deep CFR approximation quality)
+- **실전 버그 DB**: Day 5 sync update drift + Day 6 IW factor (1/q vs σ/q) + reach_i — Phase 3 구현 시 체크리스트
+
+---
 
 ### Phase 2 Week 1-2 완주 (2026-04-23) — 3대 CFR 변형 구현 + 3 Exit Criteria 전부 PASS
 
