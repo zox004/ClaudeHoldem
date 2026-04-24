@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 3c D-2 기각 (2026-04-24 저녁)** + **Fair NAE framework 확증**. 
-**Phase 3 metric 재설계 완료 (v4)**: Fair-data ceiling (MCCFR at matched traversal count) 기반 NAE. Leduc Day 3 Fair NAE 0.266, Kuhn 0.821.
-**테스트**: **unit 360 + integration fast 10 GREEN** (신규 test_advantage_target_normalize 13개 포함)
-**Next 세션**: **Cap 4×128 재도전** (Fair ceiling 재해석으로 기각 근거 무효화됨). 이어서 L (baseline subtraction).
+**Phase**: 3 진행 중 — **Day 4 Cap 4×128 기각 (2026-04-25)**: Fair NAE 0.258 (3-point scan 0.266→0.268→0.258). Advantage net의 Primary A가 capacity-invariant함을 6.7× ratio 확장으로 확증. Strategy net은 여전히 Cap 수혜 (σ̄_expl -14%, Primary B +0.023).
+**Phase 3 metric**: Fair NAE framework (v4) 확립. Kuhn 0.821 vs Leduc Day 4 0.258 — network approximation의 게임 scale 민감도 정량화.
+**테스트**: **unit 360 + integration fast 10 GREEN**
+**Next 세션**: **L-B (Schmid 2019 tabular baseline) 단독 실험** — Cap abandon, variance-reduction 축으로 전환 (Exit #4 v4 "L 단독" branch).
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +32,112 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 4 — Cap 4×128 기각 + Cap axis abandon (2026-04-25)
+
+> 커밋 `ed5f5d5` (yaml) + 본 문서. 3-point capacity scan (Day 3 / 3b / 4)으로 Primary A의 capacity 불변성을 결정적으로 확증. Cap 축 종결, L-B (variance reduction) 축으로 전환.
+
+#### 실험 결과 (Leduc T=500, K=100, seed=42, 93.1분)
+
+| T | prim_A | prim_B | σ̄_deep | σ̄_CFR+ | r1_mixed (n) | r2_mixed (n) |
+|---|---|---|---|---|---|---|
+| 50 | **0.2890** (peak) | 0.8087 | 238.5 | 17.06 | 0.233 (9) | 0.266 (89) |
+| 100 | 0.2673 | 0.8069 | 229.7 | 6.71 | 0.238 (7) | **0.279** (78) |
+| 250 | 0.2540 | 0.8358 | 168.2 | 1.60 | 0.213 (6) | 0.234 (66) |
+| **500** | **0.2470** | **0.8232** | **139.4** | 0.463 | 0.234 (6) | 0.250 (65) |
+
+W&B: https://wandb.ai/zox004/poker-ai-hunl/runs/8uzm45rp (online sync complete)
+
+#### 3-Point Capacity Scan 종합
+
+| Config | Params/net | Cap ratio (per pair) | Prim A | Fair NAE | Prim B | σ̄_expl | r2_mixed L∞ |
+|---|---|---|---|---|---|---|---|
+| Day 3 (3×64) | 5.2k | **15.6:1** | 0.2549 | 0.266 | 0.7883 | 181.6 | 0.263 |
+| Day 3b (3×128) | 18.7k | **55.6:1** | 0.2570 | 0.268 | 0.8006 | 162.4 | 0.250 |
+| **Day 4 (4×128)** | **35.2k** | **104.8:1** | **0.2470** | **0.258** | **0.8232** | **139.4** | **0.250** |
+
+**Capacity ratio (per (infoset × avg_legal_actions))** 재정밀화 (멘토 요청):
+- Kuhn 3×64: 389.5:1 (Fair NAE 0.82)
+- Leduc 4×128: 104.8:1 = Kuhn 3×64의 **27%**
+
+**Scaling fit 불일치 (Primary A 실측 0.247 vs 예측)**:
+- sqrt: 0.40 (-38% 벗어남)
+- log: 0.63 (-61% 벗어남)
+- linear: 0.20 (+24% 벗어남)
+- → **Kuhn→Leduc capacity transfer 가정 반증**. 파라메트릭 fit 없음.
+
+#### 판정: Cap axis EXHAUSTED for Primary A
+
+3-point scan (ratio, Prim A): **(15.6, 0.255) → (55.6, 0.257) → (104.8, 0.247)**. 6.7× capacity 증가 시 ±0.01 noise 수준. Primary A는 **capacity-invariant**.
+
+Day 4 내부 궤적 (monotone decreasing after peak): 0.289 → 0.267 → 0.254 → 0.247. 초기 peak은 undertrained signal, 수렴과 함께 **0.25 floor로 회귀**.
+
+#### Capacity Decouples (교육 자산 #4) 강한 확증
+
+| Axis | 3×64→3×128 | 3×128→4×128 | 3×64→4×128 (전체) |
+|---|---|---|---|
+| **Primary A** (Advantage) | +0.002 | -0.010 | -0.008 (flat) |
+| **Primary B** (Strategy) | +0.012 | +0.023 | **+0.035 (monotone)** |
+| **σ̄_expl** | -11% | -14% | **-23%** |
+
+두 네트가 같은 capacity 축에서 **정반대 반응** (A flat vs B/σ̄ monotone). 반증 시도 실패 → 교육 자산 #4 단단히 확립.
+
+#### R1/R2 mixed monotonicity 분류
+
+| Metric | T=50 | T=100 | T=250 | T=500 | Mentor taxonomy |
+|---|---|---|---|---|---|
+| r1_pure | 0.174 | 0.161 | 0.149 | **0.135** | monotone ↓ (clean) |
+| r1_mixed (n=6-9) | 0.233 | 0.238 | 0.213 | 0.234 | **noise-level fluctuation** (small-n dominant) |
+| r2_pure | 0.156 | 0.159 | 0.143 | 0.159 | flat (0.14-0.16 band) |
+| r2_mixed (n=65-89) | 0.266 | **0.279** | 0.234 | 0.250 | **peak-then-flat** |
+
+**Day 3b "+67% r1_mixed (0.181→0.302)" 해석 교정**: Day 4 재현 안 됨 (0.234). Single-checkpoint small-n (n=6) artifact로 재분류. 교육 자산 #9 신규 추가.
+
+**H1/H2 가설 판정**: pure 지속 ↓ + mixed 안정 = H1 (진짜 overfit) 반증, H2 (softmax sharpening)도 mixed 악화 없어 기각. 건강한 capacity utilization.
+
+#### Exit #4 v4 Decision Tree 적용
+
+Fair NAE @ T=500 = **0.258** → **0.20-0.30 band** → "L 단독 또는 variance reduction 우선 탐색" branch. 단일 seed 기반 판정이나 Day 3/3b/4 모두 seed=42에서 ±0.005 이내 — 결정 경계(0.20) 안전거리 확보.
+
+#### Day 4 교육 자산 (9번째~11번째)
+
+**9번째**: "R1/R2 mixed L∞의 small-n (n ≤ 9) 통계는 ±0.1 fluctuation 범위. Single-checkpoint 해석 금지, larger-n metric (r2_mixed n~70) 우선. Day 3b 'R1 mixed +67% 악화 = capacity curse' 해석은 Day 4로 교정됨."
+
+**10번째**: "Capacity decouples가 advantage vs strategy에서 **완전 decouple**. 6.7× capacity 범위에서 Prim A ±0.01 vs Prim B +0.035 / σ̄_expl -23%. Network architecture가 같아도 target statistics (signed regret vs simplex)가 capacity gradient를 결정."
+
+**11번째**: "Primary A의 0.25 ceiling은 advantage net approximation의 **structural limit** — capacity로 극복 불가. 다음 공략 축은 target/signal-side (variance reduction / normalization / training budget)."
+
+#### 다음 세션 (Day 5) 계획
+
+**1순위: L-B (Schmid 2019 tabular per-(I, a) EMA baseline + correction)**
+
+수식 (Schmid 2019 Eq. 6):
+```
+r̂(I, a) = (v(I, a) - b(I, a)) + Σ_a' σ(a') · b(I, a')
+       = r_legacy(I, a) - b(I, a) + b̄(I)          [algebraic]
+```
+- b(I, a) = EMA of observed v(I, a), α=0.1
+- Storage: dict[str, np.ndarray(3,)] ≈ 288 × 3 = 864 scalars (7 KB)
+- CFR 수렴 보존: E[r̂] = E[r_legacy] (Schmid 2019 Lemma 1)
+- 구현: ~30줄, 신규 test ~15개 (exact expectation preservation 수치 검증)
+
+**설계**: Day 5 yaml = 3×64 baseline + `advantage_target_baseline: "tabular_ema"` + `baseline_alpha: 0.1`. Single variable 실험 (Cap rollback해서 L 단독 효과 측정).
+
+**성공 기준**: Primary A > 0.35 (Fair NAE > 0.36, 0.30-0.40 band 진입).
+
+**Plan B** (L-B ineffective):
+- 가설 E: advantage_epochs 4 → 10 (training budget)
+- 가설 F: linear CFR weight 재검토 (Zinkevich discount → uniform)
+
+**L-A (Schmid 2019 baseline network)** 후보는 L-B 증거 부족 시 advanced 옵션 (Player of Games 경로).
+
+#### 자발적 audit 계승 (Day 3c → Day 4 패턴)
+
+Day 4 실행 중 2번의 자발적 audit:
+1. **wandb.mode=offline 임의 오버라이드 자가 발견** — CLAUDE.md "매 실험은 반드시 W&B 로깅" + Day 3/3b/3c online 관례 위반. 즉시 kill → online 재시작. 30초 loss로 convention 보존.
+2. **Day 3b yaml에 `[50]` checkpoint 포함 기록 없음 자가 발견** — git log로 commit된 yaml은 `[100, 250, 500]`이었음에도 Day 3b log에 T=50 있었음. Live-edit 후 rollback에서 `[50]` 누락 가능성 식별, Day 4는 `[50, 100, 250, 500]`으로 정식 반영.
+
+Phase 3 공통 meta-pattern: 첫 설계의 hidden assumption을 data 또는 audit으로 발견 → iteration.
 
 ### Phase 3 Day 3c — D-2 FAIL + Fair NAE Framework 확증 (2026-04-24 저녁)
 
