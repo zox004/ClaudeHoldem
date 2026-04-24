@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 3b Cap 기각 (2026-04-24 오후)**. Primary A flat 유지 (0.2570 post-Cap vs 0.2549 baseline)
-**Phase 3 Day 3b 판정**: Cap 가설 Primary A 측면 **REJECTED**. Strategy side 부분 이득 (σ̄_expl 182 → 162 mbb/g, 11% 개선). Leduc yaml rollback to 3×64 baseline.
-**테스트**: **unit 347 + integration fast 10 GREEN** (신규 test_network_capacity_config 11개 포함)
-**Next**: 가설 **D** (advantage target scale normalize, running std) 1순위 착수 (새 세션 권장). D 단독 테스트 후 Cap+D 결합 옵션.
+**Phase**: 3 진행 중 — **Day 3c D-2 기각 (2026-04-24 저녁)** + **Fair NAE framework 확증**. 
+**Phase 3 metric 재설계 완료 (v4)**: Fair-data ceiling (MCCFR at matched traversal count) 기반 NAE. Leduc Day 3 Fair NAE 0.266, Kuhn 0.821.
+**테스트**: **unit 360 + integration fast 10 GREEN** (신규 test_advantage_target_normalize 13개 포함)
+**Next 세션**: **Cap 4×128 재도전** (Fair ceiling 재해석으로 기각 근거 무효화됨). 이어서 L (baseline subtraction).
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +32,122 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 3c — D-2 FAIL + Fair NAE Framework 확증 (2026-04-24 저녁)
+
+> 커밋 `2f3d73b` (D-2 flag rollback) + 본 문서. Day 3c의 **meta-level 발견**: metric 설계 자체가 data gathering 이후 iterative refinement 필요.
+
+#### D-2 실험 결과 (Leduc T=500, K=100, seed=42, 63분)
+
+| T | prim_A | prim_B | σ̄_expl |
+|---|---|---|---|
+| 50 | 0.2672 | 0.8198 | 261.9 |
+| 100 | 0.2457 | 0.8090 | 244.0 |
+| 250 | 0.2469 | 0.8051 | 197.4 |
+| **500** | **0.2358 ↓** | 0.7942 | 185.9 |
+
+**vs Day 3 baseline @ T=500**:
+- Primary A: **-7.5%** (0.2549 → 0.2358)
+- σ̄_expl: **+2.4%** (181.6 → 185.9)
+- R1 mixed L∞: **+41%** (0.181 → 0.255) — 충격적 악화
+- **D-2는 net-negative 확정**
+
+**Rollback**: `advantage_target_normalize: bool = False` default. Feature flag로 보존 (HUNL 재평가용).
+
+**Root cause 추정**: EMA α=0.99가 너무 slow → 후기 iteration에서 실제 variance shift를 못 따라가며 "moving target" 신호 생성.
+
+#### F-revised 발견 — MCCFR Ceiling Framework
+
+T=250 보고 후 멘토 가설 F 제안 (Vanilla reference quality 의심). **내 자발적 지적**: Vanilla CFR은 deterministic이라 multi-seed corr=1 by construction. **F 원안 flaw**.
+
+**F-revised**: MCCFR (stochastic External Sampling) 3-seed × T=500 vs Vanilla ground truth.
+
+| Scale | Single-seed MCCFR corr | Ensemble corr | **Fair (50k traversals)** |
+|---|---|---|---|
+| Leduc T=500 | 0.359 ± 0.034 | 0.429 | **0.959** |
+| Kuhn T=500 | 0.926 ± 0.034 | 0.947 | **0.991** |
+
+**Traversal budget mismatch 발견**: 
+- Deep CFR T=500 K=100 = **50k traversals/player**
+- MCCFR T=500 K=1 = **500 traversals/player** (100× 적음)
+- Single-seed MCCFR ceiling은 data-starved estimator → **너무 보수적**
+- Fair comparison: MCCFR T=50,000 × K=1
+
+#### Fair NAE 측정 (멘토 framework 완성)
+
+```
+NAE_fair = Primary A / MCCFR-ensemble corr (at matched traversal count)
+```
+
+| Scale | Deep Prim A | Fair ceiling (50k) | **Fair NAE** |
+|---|---|---|---|
+| Leduc Day 3 T=500 | 0.2549 | 0.959 | **0.266** |
+| Leduc Day 3c D-2 T=500 | 0.2358 | 0.959 | 0.246 |
+| Kuhn Day 2b-A T=500 | 0.8143 | 0.991 | **0.821** |
+
+**재해석**: 
+- Estimator는 Leduc scale에서도 충분히 수렴 가능 (0.96 ceiling)
+- Deep CFR은 **tabular MCCFR의 27%만 복구** (Leduc)
+- Kuhn은 **82%** — scale-dependent approximation efficiency gap
+- **진짜 병목 = network approximation in Leduc**, not estimator variance
+
+#### Exit #4 재설계 (v4)
+
+```
+GREEN (Phase 3 완주 기준):
+  1. NAE_fair @ T=500 > 0.40
+  2. σ̄_expl < 10 mbb/g (Leduc) / < 5 mbb/g (Kuhn)
+  3. Primary A > 0.20 (guardrail)
+
+STRETCH (의미 있는 scope 돌파):
+  1. NAE_fair @ T=500 > 0.60
+  2. σ̄_expl < 1 mbb/g (Leduc)
+  3. NAE_fair(T=2000) > NAE_fair(T=500) (trajectory monotone)
+```
+
+Current:
+- **Kuhn**: Fair NAE 0.821 ≈ STRETCH 근접 (σ̄_expl 14.4 미달)
+- **Leduc Day 3**: Fair NAE 0.266 — GREEN 한참 미달
+
+#### Day 3c 교육 자산 정식화 (5번째~8번째)
+
+**5번째**: "Correlation metric의 reference quality가 network quality 측정 상한 결정. **Reference estimator의 data budget이 network와 matched 되어야 공정**."
+
+**6번째**: "Ceiling은 single-seed / ensemble / **fair-data (matched traversal)** 세 구분. Fair-data가 가장 엄격."
+
+**7번째**: "Deep CFR network approximation efficiency는 게임 scale에 민감. Kuhn 82% vs Leduc 27% (동일 50k traversal). True bottleneck = network가 tabular estimator target을 Leduc complexity에서 학습 못함."
+
+**8번째 (meta)**: "이론적 metric 설계는 data-gathering 이후 refinement 불가피. 첫 설계를 '잠정 가설'로 취급하고 실측 evidence로 iteration."
+
+#### 3번째 자발적 멘토 오류 교정 (패턴)
+
+Phase 3 공통 패턴 — 첫 설계의 hidden assumption을 data로 발견:
+1. **Day 2 pre-smoke**: CFR+ → Vanilla reference (signed regret이 Deep CFR 목표)
+2. **Day 2b-A**: buffer-side → loss-side linear CFR weighting (이전 sample 재해석 회피)
+3. **Day 3c**: single-seed → fair-data ceiling (traversal budget matching)
+
+이 패턴 자체가 Phase 3 큰 교훈.
+
+#### 다음 세션 (Day 4) 전략 조정
+
+**Fair NAE 재해석으로 Cap 가설 재도전 정당성 확보**:
+- Day 3b Cap 기각은 single-seed ceiling 기준이었음 (0.36)
+- Fair ceiling 0.96 → Cap이 정말 network-side 해결책인지 재평가 필요
+- **Cap 4×128 (Step 2)**이 원안대로 타당 — 이번엔 Fair NAE로 판정
+
+**Capacity-entry ratio 분석**:
+- Kuhn 3×64: 12k/24 = 500:1 (over-param, NAE 0.82)
+- Leduc 3×64: 5k/288 = 18:1 (severe under-param)
+- Leduc 3×128: 18k/288 = 63:1 (여전히 under-param)
+- **Leduc 4×128: 35k/288 = 121:1 (Kuhn의 1/4)**
+- Leduc 6×256: 200k/288 = 700:1 (Kuhn 돌파, but 4-5h wall-clock)
+
+**다음 세션 계획**:
+1. Step 1: Cap 4×128 Leduc T=500 재실행 (~1.5-2h)
+2. Step 2: Cap+L (baseline subtraction) 결합 if Cap 부분 성공
+3. Step 3: Phase 3 전략 재평가
+
+**Clone/confidence**: Cap+L GREEN (NAE > 0.4) 달성 50-60% 예상. STRETCH (NAE > 0.6) 20-30%. Brown 2019 T=10^5 scale은 infra 병목으로 scope 밖 (8-12 days single experiment).
 
 ### Phase 3 Day 3b — Cap 가설 기각, Strategy side 이득 (2026-04-24 오후)
 
