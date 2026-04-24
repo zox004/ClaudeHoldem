@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 3 Leduc T=500 smoke 완료 (2026-04-24): 3/3 GREEN FAIL, algorithm issue 확정**
-**Phase 3 Day 3 판정**: Primary A flat 0.25 (Kuhn 0.81 대비 3.5× 낮음) / Primary B 0.79 / σ̄_expl 181.6 mbb/g (CFR+ baseline 0.463의 392×, Kuhn 160× 대비 더 나쁨)
-**테스트**: **unit 336 + integration fast 10 GREEN** (Leduc harness는 experiment script로만, 별도 tests 없음)
-**Next**: (새 세션 권장) 가설 **Cap** 1순위 (network 4×128 확대, Leduc 550 pairs / 12k params = 1:22 under-parameterization). 그 다음 Buf/D/Lr/C
+**Phase**: 3 진행 중 — **Day 3b Cap 기각 (2026-04-24 오후)**. Primary A flat 유지 (0.2570 post-Cap vs 0.2549 baseline)
+**Phase 3 Day 3b 판정**: Cap 가설 Primary A 측면 **REJECTED**. Strategy side 부분 이득 (σ̄_expl 182 → 162 mbb/g, 11% 개선). Leduc yaml rollback to 3×64 baseline.
+**테스트**: **unit 347 + integration fast 10 GREEN** (신규 test_network_capacity_config 11개 포함)
+**Next**: 가설 **D** (advantage target scale normalize, running std) 1순위 착수 (새 세션 권장). D 단독 테스트 후 Cap+D 결합 옵션.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +32,65 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 3b — Cap 가설 기각, Strategy side 이득 (2026-04-24 오후)
+
+> 커밋 `7a60ec6`. 멘토 단계적 접근 (Step 1 = 3×128 width 확대, Step 2 = 4×128 조건부).
+
+#### 설계 (멘토 주관 ≥ 원안 조정)
+
+원안 4×128 (5h) vs 대안 3×128 (3h) + 조건부 4×128. 기댓값 계산으로 단계적 접근 선택.
+
+Width vs depth 선택 — Leduc shallow + wide 가설 (encoding이 hierarchical collapse 이미 수행, round 1/2 composition은 encoding에 내재, Zhang 2017 "width first"):
+- **Step 1: 3×128 (num_hidden_layers=2, hidden_dim=128)**. Width 2×, depth 동일.
+- Params 5.2k → 18.7k (3.56×).
+
+구현: `AdvantageNet` / `StrategyNet`에 `hidden_dim` + `num_hidden_layers` 파라미터 추가, DeepCFR constructor에 전달. 11 신규 unit tests (정확 param count 검증 포함).
+
+#### 실험 결과 (Leduc T=500 K=100 seed=42, 76.4분 wall-clock)
+
+| T | Prim A | Prim B | σ̄_deep | σ̄_CFR+ |
+|---|---|---|---|---|
+| 50 | 0.2704 | 0.8236 | 241.5 | 17.06 |
+| 100 | 0.2414 | 0.8414 | 208.0 | 6.71 |
+| 250 | 0.2429 | 0.8123 | 163.9 | 1.60 |
+| **500** | **0.2570** | **0.8006** | **162.4** | **0.463** |
+
+Day 3 (3×64) baseline 비교 @ T=500:
+
+| 지표 | Day 3 | Day 3b | Δ |
+|---|---|---|---|
+| Primary A | 0.2549 | 0.2570 | **+0.002 (flat)** |
+| Primary B | 0.7883 | 0.8006 | +0.012 |
+| σ̄_deep | 181.6 | 162.4 | **-11%** |
+| R1 pure L∞ | 0.176 | 0.147 | -16% |
+| R1 mixed L∞ | 0.181 | 0.302 | **+67% (overfit?)** |
+| R2 pure L∞ | 0.188 | 0.174 | -7% |
+| R2 mixed L∞ | 0.263 | 0.250 | -5% |
+
+#### 판정
+
+**Primary A 측면**: **REJECTED**. 4 checkpoint 모두 0.24-0.27 flat. Day 3 baseline과 본질적으로 동일.
+
+**Strategy side**: **부분 이득**. σ̄_expl -11%, Primary B +0.012. 그러나 R1 mixed L∞ +67% 악화 (6 infoset) — overfit 경계 신호.
+
+**기각 근거**:
+- Primary A가 원인이 capacity이면 T↑에 따라 단조 상승 기대. 실측은 flat (4 checkpoint std 0.012).
+- Width 2×로 advantage net의 signed regret 학습이 본질적으로 개선 안 됨 → network capacity **not root cause**.
+
+#### 교육적 발견
+
+**Day 3b finding (2026-04-24)**: Primary A 낮음 (0.25)의 원인은 **network capacity가 아니다**. Width 확대 3.56×는 Primary A를 움직이지 못함 (flat 유지). 반면 Strategy net은 Cap 수혜 (σ̄_expl -11%, Primary B 개선). **Advantage net과 Strategy net의 "capacity 민감도" 분리**: Strategy net (simplex regression)은 width 이득, Advantage net (signed regret regression)은 다른 원인 (target scale or data quality)이 bottleneck. 이 분리가 Phase 3 Day 3c (다음 세션)에서 가설 D (advantage target running-std normalize) 우선순위 결정의 근거.
+
+#### 다음 세션 (Day 3c) 계획
+
+**1순위: 가설 D-2 (Advantage Target Running Std Normalize)**
+- 구현 ~15줄: EMA running std per-player, `y_scaled = y / adv_target_std`
+- Regret matching이 scale-invariant이므로 inference 시 unscale 불필요
+- 예상 효과: Primary A 0.25 → 0.4-0.6 (Kuhn 0.8은 entry-per-sample 부족으로 불가능일 수도)
+- D 단독 실험 (yaml baseline 64로 rollback 상태)
+
+**2순위 (D 성공 후)**: Cap+D 결합 — strategy-side + advantage-side 둘 다 개선 가능성 평가
 
 ### Phase 3 Day 3 — Leduc smoke FAIL, algorithm issue 확정 (2026-04-24)
 
