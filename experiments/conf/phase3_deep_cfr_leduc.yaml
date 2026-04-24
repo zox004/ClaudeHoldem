@@ -1,0 +1,48 @@
+# @package _global_
+# Phase 3 Day 3 — Leduc Deep CFR approximation quality experiment.
+#
+# Direct comparison to Kuhn Day 2b-A (same T=500, K=100, seed=42):
+# - Kuhn Post-A @ T=500: Primary A 0.8143, Primary B 0.9873, σ̄_expl 14.4
+# - Leduc scale: 288 infosets × state-dep legal actions (~550+ flat pairs)
+#
+# Diagnosis branch expected (mentor 2026-04-24):
+#   σ̄_expl > 100 mbb/g  → algorithm issue (B/D/5 hypotheses next)
+#   10–100 mbb/g         → partial scale gain, reprioritise
+#   < 10 mbb/g           → scale artifact confirmed, Exit #4 stage
+#   < 1 mbb/g            → jump to T=2000 directly
+
+experiment_name: phase3_deep_cfr_leduc
+iterations: 500
+seed: 42
+
+deep_cfr:
+  traversals_per_iter: 100
+  buffer_capacity: 100000
+  batch_size: 64
+  advantage_epochs: 4
+  strategy_epochs: 4
+  device: cpu
+
+checkpoints: [100, 250, 500]
+
+# Exit thresholds (1st-pass proposal, mentor 2026-04-24; re-tune via
+# measurement per Phase 2 Day 6 pattern).
+primary_a_green_threshold: 0.75
+primary_b_green_threshold: 0.90
+sigma_bar_expl_mbb_stretch: 10.0   # CFR+ T=500 baseline 0.463 × 20
+
+big_blind: 2.0
+
+wandb:
+  project: poker-ai-hunl
+  tags: [phase3, leduc, deep-cfr]
+  mode: online
+
+hydra:
+  run:
+    dir: experiments/outputs/${experiment_name}/${now:%Y%m%d-%H%M%S}
+  sweep:
+    dir: experiments/outputs/${experiment_name}/multirun/${now:%Y%m%d-%H%M%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false
