@@ -290,8 +290,14 @@ class DeepCFR:
 
                 pred = net(x_b)
                 # Per-sample weighted MSE (Linear CFR loss weighting).
+                # Normalized weighted mean: Σ w_i · s_i / Σ w_i (not / n),
+                # so T-dependent weight scale does not inflate effective
+                # gradient magnitude as iteration grows (Phase 3 Day 2b
+                # hypothesis A fix — iter_weight=t polynomial growth would
+                # otherwise bias optimisation toward recent samples).
                 per_sample = ((pred - y_b) ** 2).mean(dim=1)
-                loss = (per_sample * w_b).mean()
+                w_sum = w_b.sum().clamp(min=1e-8)
+                loss = (per_sample * w_b).sum() / w_sum
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -349,7 +355,11 @@ class DeepCFR:
                     torch.zeros_like(y_b),
                 )
                 per_sample_ce = -terms.sum(dim=-1)
-                loss = (per_sample_ce * w_b).mean()
+                # Normalized weighted mean (Day 2b hypothesis A): same
+                # rationale as advantage path — decouple effective gradient
+                # from T-dependent weight scale.
+                w_sum = w_b.sum().clamp(min=1e-8)
+                loss = (per_sample_ce * w_b).sum() / w_sum
 
                 optimizer.zero_grad()
                 loss.backward()  # type: ignore[no-untyped-call]
