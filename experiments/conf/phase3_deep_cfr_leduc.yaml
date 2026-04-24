@@ -22,17 +22,23 @@ deep_cfr:
   advantage_epochs: 4
   strategy_epochs: 4
   device: cpu
-  # Phase 3 Day 3b hypothesis Cap experiment (2026-04-24):
-  # Tested hidden_dim=128 / num_hidden_layers=2 (3×128, 18.7k params).
-  # Result: Primary A flat at 0.24-0.27 across T=50/100/250/500 —
-  # Cap REJECTED for Primary A. Strategy-side minor gain (σ̄_expl -11%,
-  # Primary B +0.012). yaml rolled back to baseline 3×64 for the next
-  # hypothesis (D — advantage target scale normalise) to isolate
-  # single-variable effects; Cap+D combination can be tested later.
-  hidden_dim: 64
-  num_hidden_layers: 2
+  # Phase 3 Day 4 — Cap 4×128 retry under Fair NAE framework (2026-04-25).
+  # Day 3c found single-seed MCCFR ceiling (0.36) was too conservative;
+  # traversal-matched MCCFR ensemble ceiling is 0.959, so Day 3b Cap
+  # rejection ("NAE flat at 0.67 vs ceiling 0.36") was re-scoped.
+  # Under Fair NAE (= Primary A / 0.959), both Day 3 and Day 3b sit at
+  # ~0.266 — no Cap gain at 3×128 (63:1 per-infoset). Day 4 tests a
+  # single depth step (4×128, ~35k params/net, ~105:1 per (infoset ×
+  # avg_legal_actions) ≈ 27% of Kuhn 3×64's 389:1) to decide whether
+  # capacity axis is the Leduc Primary A bottleneck or whether Cap
+  # should be abandoned entirely.
+  hidden_dim: 128
+  num_hidden_layers: 3
 
-checkpoints: [100, 250, 500]
+# Day 4 extended checkpoints [50, 100, 250, 500] to observe
+# R1/R2 mixed L∞ monotonicity (mentor 2026-04-25): peak-then-X vs
+# monotone-increasing vs noise-level fluctuation classification.
+checkpoints: [50, 100, 250, 500]
 
 # Exit thresholds (1st-pass proposal, mentor 2026-04-24; re-tune via
 # measurement per Phase 2 Day 6 pattern).
