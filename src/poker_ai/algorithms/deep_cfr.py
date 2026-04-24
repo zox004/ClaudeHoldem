@@ -79,6 +79,8 @@ class DeepCFR:
         advantage_epochs: int = 4,
         strategy_epochs: int = 4,
         epsilon: float = 0.05,
+        hidden_dim: int = 64,
+        num_hidden_layers: int = 2,
     ) -> None:
         self.game = game
         self.n_actions = n_actions
@@ -91,6 +93,8 @@ class DeepCFR:
         self.advantage_epochs = advantage_epochs
         self.strategy_epochs = strategy_epochs
         self.epsilon = epsilon
+        self.hidden_dim = hidden_dim
+        self.num_hidden_layers = num_hidden_layers
 
         # Global torch seed for reproducible network init; the sampling RNG
         # is kept separate (numpy Generator) so it does not perturb torch.
@@ -98,12 +102,18 @@ class DeepCFR:
         self._rng = np.random.default_rng(seed)
 
         self.advantage_nets: dict[int, nn.Module] = {
-            p: AdvantageNet(encoding_dim, n_actions).to(self.device)
+            p: AdvantageNet(
+                encoding_dim, n_actions,
+                hidden_dim=hidden_dim,
+                num_hidden_layers=num_hidden_layers,
+            ).to(self.device)
             for p in (0, 1)
         }
-        self.strategy_net: nn.Module = StrategyNet(encoding_dim, n_actions).to(
-            self.device
-        )
+        self.strategy_net: nn.Module = StrategyNet(
+            encoding_dim, n_actions,
+            hidden_dim=hidden_dim,
+            num_hidden_layers=num_hidden_layers,
+        ).to(self.device)
 
         self.advantage_buffers: dict[int, ReservoirBuffer] = {
             p: ReservoirBuffer(
@@ -273,7 +283,9 @@ class DeepCFR:
 
         # From-scratch reinit (design lock #4 default path).
         self.advantage_nets[player] = AdvantageNet(
-            self.encoding_dim, self.n_actions
+            self.encoding_dim, self.n_actions,
+            hidden_dim=self.hidden_dim,
+            num_hidden_layers=self.num_hidden_layers,
         ).to(self.device)
         net = self.advantage_nets[player]
         optimizer = torch.optim.Adam(net.parameters(), lr=_LEARNING_RATE)
@@ -325,7 +337,9 @@ class DeepCFR:
             return
 
         self.strategy_net = StrategyNet(
-            self.encoding_dim, self.n_actions
+            self.encoding_dim, self.n_actions,
+            hidden_dim=self.hidden_dim,
+            num_hidden_layers=self.num_hidden_layers,
         ).to(self.device)
         net = self.strategy_net
         optimizer = torch.optim.Adam(net.parameters(), lr=_LEARNING_RATE)

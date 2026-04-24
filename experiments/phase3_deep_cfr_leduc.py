@@ -183,6 +183,8 @@ def _run_training(cfg: DictConfig) -> dict[str, object]:
         batch_size=int(cfg.deep_cfr.batch_size),
         advantage_epochs=int(cfg.deep_cfr.advantage_epochs),
         strategy_epochs=int(cfg.deep_cfr.strategy_epochs),
+        hidden_dim=int(cfg.deep_cfr.get("hidden_dim", 64)),
+        num_hidden_layers=int(cfg.deep_cfr.get("num_hidden_layers", 2)),
     )
     vanilla = VanillaCFR(game=game, n_actions=3)
     cfp = CFRPlus(game=game, n_actions=3)

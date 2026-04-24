@@ -22,6 +22,15 @@ deep_cfr:
   advantage_epochs: 4
   strategy_epochs: 4
   device: cpu
+  # Phase 3 Day 3b hypothesis Cap experiment (2026-04-24):
+  # Tested hidden_dim=128 / num_hidden_layers=2 (3×128, 18.7k params).
+  # Result: Primary A flat at 0.24-0.27 across T=50/100/250/500 —
+  # Cap REJECTED for Primary A. Strategy-side minor gain (σ̄_expl -11%,
+  # Primary B +0.012). yaml rolled back to baseline 3×64 for the next
+  # hypothesis (D — advantage target scale normalise) to isolate
+  # single-variable effects; Cap+D combination can be tested later.
+  hidden_dim: 64
+  num_hidden_layers: 2
 
 checkpoints: [100, 250, 500]
 
