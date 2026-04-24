@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 2 partial 완료 (2026-04-24), Day 2b (advantage net audit) 착수 예정**
-**Phase 3 Day 2 판정**: Primary B ✅ (0.99) / σ̄_expl ❌ (21.4 mbb/g, baseline 238×) / Primary A trajectory 역행 → Day 2b로 분리
-**테스트**: **unit 336 + integration fast 10 GREEN** (strategy_net_training 8 신규, correlation 11 신규, reservoir 14 + deep_cfr 16 + encode 21 + 기존)
-**Next**: Day 2b — Primary A trajectory 역행 원인 audit (hypothesis A/B/C/D 4개)
+**Phase**: 3 진행 중 — **Day 2b-A 완료 (2026-04-24): Primary A trajectory 역전 성공**
+**Phase 3 Day 2b 판정**: Primary A ✅ (trajectory 역전 + 0.8143 > 0.8) / σ̄_expl 부분 성공 (117→14.4, 8.2× 개선; 절대값 여전히 baseline 160×)
+**테스트**: **unit 336 + integration fast 10 GREEN**
+**Next**: (새 세션 권장) Day 2b-B/C/D 추가 가설 검증 OR Day 3 Leduc 진입
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +32,65 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 2b-A — Advantage net Primary A trajectory 역전 (2026-04-24)
+
+> 커밋 `4220bf9`. 멘토 Day 2b 가설 1 (iter_weight polynomial growth → loss bias).
+
+#### Root cause 분석
+
+Pre-fix loss: `loss = (per_sample × w_b).mean() = Σ w_i · s_i / n`
+- `n` = batch size (상수), `w_i = iteration` (linear CFR weight = t)
+- Batch 내 `mean(w) ≈ T/2` → loss magnitude ∝ T (linear growth)
+- 결과: 후기 iter 후 batch에서 effective gradient magnitude가 T에 비례 팽창
+- Adam이 adaptive LR로 일부 보정하지만 **from-scratch reinit + T-scaling loss**는 수렴 landscape를 iter 의존적으로 왜곡
+
+#### Fix: true weighted mean
+
+Post-fix: `loss = Σ w_i · s_i / Σ w_i` (per batch)
+- Magnitude T-independent
+- 샘플 간 상대 가중치 보존 (Linear CFR 수학적 정확성 유지)
+- Buffer는 건드리지 않음 (raw iter_weight 저장 그대로, 재해석 문제 회피)
+- Loss-side vs buffer-side normalization 선택 — **loss-side가 robust** (이전 샘플 저장값 불변)
+
+Advantage + Strategy loss path 둘 다 동일하게 수정.
+
+#### 실측 trajectory 비교 (T=500, K=100, seed=42)
+
+**Primary A** (Deep adv vs Vanilla R_cum):
+
+| T | Pre-all (MSE) | Post-CE | **Post-A** | change |
+|---|---|---|---|---|
+| 100 | 0.8424 | 0.8424 | **0.8533** | +0.011 |
+| 250 | 0.8125 | 0.8125 | 0.8122 | ≈ |
+| **500** | **0.7976 ↓** | **0.7976 ↓** | **0.8143 ↑** | **+0.017** |
+
+핵심: **Pre-fix는 T 증가에 단조 감소 (0.8424 → 0.7976)**, **Post-A는 T=250 dip 후 T=500 회복** → trajectory 방향 역전.
+
+**σ̄_deep exploitability**:
+
+| T | Pre-all | Post-CE | Post-A |
+|---|---|---|---|
+| 100 | 105.4 | 24.8 | 22.7 |
+| 250 | 109.6 | 20.3 | 18.7 |
+| 500 | 117.4 | 21.4 | **14.4** (추가 33% 개선) |
+
+Post-A는 σ̄_expl 궤적도 단조 감소로 전환 (Post-CE에선 T=250 최소 후 T=500 반등).
+
+#### Day 2b 판정
+
+| 기준 | 목표 | 실측 @ T=500 | 판정 |
+|---|---|---|---|
+| Primary A > 0.8 | > 0.8 | 0.8143 | ✅ |
+| Primary A trajectory 역전 | 상승 또는 안정 | T=500 > T=250 | ✅ |
+| Primary B > 0.95 | > 0.95 | 0.9873 | ✅ |
+| σ̄_expl < 5 mbb/g | < 5 | 14.4 | ❌ (baseline 0.09 대비 160×) |
+
+**Day 2b-A 판정**: 구조적 목표 (trajectory 역전) 달성. σ̄_expl 절대값은 Primary A가 완전히 baseline에 수렴 (>0.95) 안 되어서 bounded. **추가 가설 B/C/D는 다음 세션**으로 분리 (context 관리 + 이미 Day 2b 핵심 목표 달성).
+
+#### Day 2b-A 교육적 발견
+
+**Linear CFR weighting을 loss-side로 정규화해야 T-independent 학습 달성.** Buffer-side normalization (`iter_weight = t/T_total`)은 이전 샘플 저장값이 inconsistent해지는 문제 있음. Loss-side `Σ w·s / Σ w`는 batch 단위 재정규화라 robust. Phase 3+에서 Deep CFR / Deep MCCFR 계열 학습에 지속 적용.
 
 ### Phase 3 Day 2 — Strategy net MSE pathology 발견 + Cross-entropy fix (2026-04-24)
 
