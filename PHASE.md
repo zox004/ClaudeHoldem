@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 2b-A 완료 (2026-04-24): Primary A trajectory 역전 성공**
-**Phase 3 Day 2b 판정**: Primary A ✅ (trajectory 역전 + 0.8143 > 0.8) / σ̄_expl 부분 성공 (117→14.4, 8.2× 개선; 절대값 여전히 baseline 160×)
-**테스트**: **unit 336 + integration fast 10 GREEN**
-**Next**: (새 세션 권장) Day 2b-B/C/D 추가 가설 검증 OR Day 3 Leduc 진입
+**Phase**: 3 진행 중 — **Day 3 Leduc T=500 smoke 완료 (2026-04-24): 3/3 GREEN FAIL, algorithm issue 확정**
+**Phase 3 Day 3 판정**: Primary A flat 0.25 (Kuhn 0.81 대비 3.5× 낮음) / Primary B 0.79 / σ̄_expl 181.6 mbb/g (CFR+ baseline 0.463의 392×, Kuhn 160× 대비 더 나쁨)
+**테스트**: **unit 336 + integration fast 10 GREEN** (Leduc harness는 experiment script로만, 별도 tests 없음)
+**Next**: (새 세션 권장) 가설 **Cap** 1순위 (network 4×128 확대, Leduc 550 pairs / 12k params = 1:22 under-parameterization). 그 다음 Buf/D/Lr/C
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +32,76 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 3 — Leduc smoke FAIL, algorithm issue 확정 (2026-04-24)
+
+> 커밋 `7cffbda`. Day 3 목표: Kuhn Post-Day-2b-A fix가 Leduc scale에서도 유효한지 검증.
+
+#### 실험 설계 (멘토 Option B 승인)
+
+Kuhn T=500 post-Day-2b-A 최종 결과 (prim_A 0.8143, prim_B 0.9873, σ̄_expl 14.4 mbb/g — baseline 160×)를 직접 Leduc T=500과 같은 조건 (K=100, seed=42)으로 비교. 세 가지 분기 예상:
+- σ̄_deep > 100 → algorithm issue (B/D/5 진입)
+- 10-100 → partial scale gain
+- < 10 → scale artifact (Kuhn 160× 자체가 작은 게임 artifact)
+
+#### Leduc T=500 실측 (61분 wall-clock)
+
+| T | prim_A | prim_B | tert | σ̄_deep | σ̄_CFR+ | σ̄_Vanilla | ratio |
+|---|---|---|---|---|---|---|---|
+| 100 | 0.2459 | 0.8086 | 0.2464 | 230.9 | 6.71 | 46.5 | 34× |
+| 250 | 0.2591 | 0.7994 | 0.2614 | 192.7 | 1.60 | 19.4 | 120× |
+| **500** | **0.2549** | **0.7883** | 0.2598 | **181.6** | **0.463** | 15.1 | **392×** |
+
+**Day 3 GREEN 판정**:
+
+| 기준 | 목표 | 실측 | 판정 |
+|---|---|---|---|
+| Primary A > 0.75 | > 0.75 | 0.2549 | ❌ (0.5 미달) |
+| Primary B > 0.90 | > 0.90 | 0.7883 | ❌ |
+| σ̄_expl < 10 mbb/g | < 10 | 181.6 | ❌ (18× 초과) |
+
+**3/3 FAIL. Algorithm issue 확정**.
+
+#### Per-round L∞ 분석 (288 infoset 전량 방문)
+
+| | Round 1 (n=18) | Round 2 (n=270) |
+|---|---|---|
+| Pure | L∞ 0.176 (n=12) | L∞ 0.188 (n=205) |
+| Mixed | L∞ 0.181 (n=6) | **L∞ 0.263 (n=65)** |
+
+**Round 2 mixed L∞ 0.263이 Kuhn Post-A 0.095 대비 2.8× 나쁨**. CE fix의 pure 이득은 Leduc에서도 부분 유지되지만, mixed strategy 분포 복잡도가 Kuhn보다 훨씬 높아서 MSE→CE만으로 부족.
+
+#### 주요 해석
+
+**1. "Scale 이득" Brown 2019 가설 반증**: T 증가에 따라 ratio **악화** (34→120→392×). CFR+가 T=500에 이미 0.463 mbb/g에 도달하는 동안 Deep CFR는 181 mbb/g. CFR+가 훨씬 빠르게 Nash 수렴. Kuhn post-A ratio 160×보다 **더 나쁨** — Leduc에서 신경망 approximation의 상대적 우위 실증되지 않음.
+
+**2. Primary A 완전 flat 0.25**: T=100/250/500 세 checkpoint 모두 Primary A ~0.25. Day 2b-A loss normalization 효과가 Leduc에서는 무의미. Kuhn (0.81)과의 3.5× 차이는 algorithm 구조 문제 신호.
+
+**3. "Kuhn Post-A 결과는 scale artifact 아님"**: Kuhn에서 0.81 Primary A가 가능했던 이유는 **entry당 training sample 수**가 충분했기 때문. 
+   - Kuhn: 24 pairs, T=500 × K=100 = 50k visits → infoset당 ~2000 samples
+   - Leduc: 550 pairs, T=500 × K=100 = 50k visits → infoset당 ~90 samples (22× 적음)
+   - Deep CFR 성능은 entry당 sample 수에 매우 민감 — Leduc이 under-trained.
+
+**4. Under-parameterization 의심**: 
+   - Kuhn: 24 pairs / 12k net params → 1:500 (오히려 overparameterized)
+   - Leduc: 550 pairs / 12k params → 1:22 (under-parameterized 가능)
+   - 3×64 MLP capacity가 Leduc의 550 pair 다양성을 담기에 부족할 수 있음.
+
+#### 가설 우선순위 (다음 세션)
+
+| # | 가설 | 구현 | 예측 효과 | smoke 비용 |
+|---|---|---|---|---|
+| **Cap** | **Network 4×128 (확대)** | hidden_dim 파라미터 1줄 | Primary A 돌파 기대 (under-param 해소) | ~60분 (Leduc 모델 커지면 train 느려짐) |
+| Buf | Buffer 100k → 1M (10×) | 1줄 | 포화 후 초기 sample 보존 | ~60-70분 |
+| D | Advantage target normalize (running std) | 5-10분 | Leduc regret range 커서 gradient 불안정 해소 | ~60분 |
+| Lr | Adam lr 1e-3 → 5e-4 또는 1e-4 | 1줄 | Target scale 큰 경우 안정화 | ~60분 |
+| C | Warm-start vs from-scratch reinit | 10분 | 학습 연속성 | ~60분 |
+
+**1순위: Cap** — 물리적 근거 가장 강함 (under-param ratio 1:22). Kuhn에서 이미 Primary A 0.81 달성 가능함을 증명했으니, Leduc에서 낮은 0.25는 "동일 capacity로는 Leduc 550 pair를 fit 못함"이 가장 자연스러운 설명.
+
+#### 교육적 발견
+
+**Day 3 finding (2026-04-24)**: Kuhn에서 성공한 fix (CE + loss normalization)가 Leduc에서 Primary A 0.25 flat로 완전 실패. **"큰 게임에서 function approximation 이득" 주장은 entry당 training sample 수가 충분할 때만 성립**. Leduc의 550 pairs × K=100 × T=500 = infoset당 90 sample은 3×64 MLP에게 부족. Kuhn은 infoset당 ~2000 samples으로 over-saturated. 게임 scale에 맞는 network capacity 스케일링이 Phase 3+ 필수 설계 원칙.
 
 ### Phase 3 Day 2b-A — Advantage net Primary A trajectory 역전 (2026-04-24)
 
