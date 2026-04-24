@@ -81,6 +81,7 @@ class DeepCFR:
         epsilon: float = 0.05,
         hidden_dim: int = 64,
         num_hidden_layers: int = 2,
+        advantage_target_normalize: bool = False,
     ) -> None:
         self.game = game
         self.n_actions = n_actions
@@ -136,6 +137,19 @@ class DeepCFR:
             target_dim=n_actions,
             mask_dim=n_actions,
         )
+
+        # Phase 3 Day 3c hypothesis D-2 (advantage target running-std
+        # normalisation). Gated by ``advantage_target_normalize`` flag.
+        # Default False after Day 3c T=500 Leduc smoke showed it was
+        # net-negative (Primary A -0.019 vs baseline, σ̄_expl +2.4%,
+        # Fair NAE 0.266 → 0.246). Likely cause: α=0.99 EMA is too slow
+        # to track the actual variance shift across iterations, making
+        # the normaliser add noise rather than remove it. Retained
+        # behind a flag so that HUNL-scale re-evaluation is cheap.
+        self.advantage_target_normalize = advantage_target_normalize
+        self._adv_target_std: dict[int, float] = {0: 1.0, 1: 1.0}
+        self._adv_target_std_initialized: dict[int, bool] = {0: False, 1: False}
+        self._adv_target_std_ema: float = 0.99
 
         self.iteration: int = 0
 
@@ -300,6 +314,26 @@ class DeepCFR:
                 y_b = targets[idx]
                 w_b = weights[idx]
 
+                # Phase 3 Day 3c hypothesis D-2: running-std target scale
+                # normaliser, per player. GATED — Day 3c T=500 smoke showed
+                # net-negative effect (see PHASE.md Day 3c log). Default OFF
+                # but kept behind a flag for HUNL-scale re-evaluation.
+                if self.advantage_target_normalize:
+                    batch_std = float(y_b.abs().mean().detach().item())
+                    batch_std = max(batch_std, 1e-4)
+                    if not self._adv_target_std_initialized[player]:
+                        self._adv_target_std[player] = batch_std
+                        self._adv_target_std_initialized[player] = True
+                    else:
+                        alpha = self._adv_target_std_ema
+                        self._adv_target_std[player] = (
+                            alpha * self._adv_target_std[player]
+                            + (1.0 - alpha) * batch_std
+                        )
+                    y_scaled = y_b / self._adv_target_std[player]
+                else:
+                    y_scaled = y_b
+
                 pred = net(x_b)
                 # Per-sample weighted MSE (Linear CFR loss weighting).
                 # Normalized weighted mean: Σ w_i · s_i / Σ w_i (not / n),
@@ -307,7 +341,7 @@ class DeepCFR:
                 # gradient magnitude as iteration grows (Phase 3 Day 2b
                 # hypothesis A fix — iter_weight=t polynomial growth would
                 # otherwise bias optimisation toward recent samples).
-                per_sample = ((pred - y_b) ** 2).mean(dim=1)
+                per_sample = ((pred - y_scaled) ** 2).mean(dim=1)
                 w_sum = w_b.sum().clamp(min=1e-8)
                 loss = (per_sample * w_b).sum() / w_sum
 
