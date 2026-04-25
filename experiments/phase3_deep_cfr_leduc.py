@@ -79,6 +79,10 @@ def _train_until(
         bucket[f"train/{tag}_target_abs_std"] = float(ev["target_abs_std"])  # type: ignore[arg-type]
         bucket[f"train/{tag}_grad_norm_max"] = float(ev["grad_norm_max"])  # type: ignore[arg-type]
         bucket[f"train/{tag}_n_samples"] = float(ev["n_samples"])  # type: ignore[arg-type]
+        # Tier 2 (L-B active): forward baseline_* keys if present.
+        for key in ("baseline_n_keys", "baseline_abs_mean", "baseline_var"):
+            if key in ev:
+                bucket[f"train/{tag}_{key}"] = float(ev[key])  # type: ignore[arg-type]
     for it in sorted(by_iter):
         wandb.log(by_iter[it], step=it)
 
@@ -211,6 +215,8 @@ def _run_training(cfg: DictConfig) -> dict[str, object]:
         strategy_epochs=int(cfg.deep_cfr.strategy_epochs),
         hidden_dim=int(cfg.deep_cfr.get("hidden_dim", 64)),
         num_hidden_layers=int(cfg.deep_cfr.get("num_hidden_layers", 2)),
+        advantage_baseline=str(cfg.deep_cfr.get("advantage_baseline", "none")),
+        baseline_alpha=float(cfg.deep_cfr.get("baseline_alpha", 0.1)),
     )
     vanilla = VanillaCFR(game=game, n_actions=3)
     cfp = CFRPlus(game=game, n_actions=3)

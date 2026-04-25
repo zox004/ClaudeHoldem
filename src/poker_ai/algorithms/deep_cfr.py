@@ -82,6 +82,8 @@ class DeepCFR:
         hidden_dim: int = 64,
         num_hidden_layers: int = 2,
         advantage_target_normalize: bool = False,
+        advantage_baseline: str = "none",
+        baseline_alpha: float = 0.1,
     ) -> None:
         self.game = game
         self.n_actions = n_actions
@@ -150,6 +152,29 @@ class DeepCFR:
         self._adv_target_std: dict[int, float] = {0: 1.0, 1: 1.0}
         self._adv_target_std_initialized: dict[int, bool] = {0: False, 1: False}
         self._adv_target_std_ema: float = 0.99
+
+        # Phase 3 Day 5 Step 5 (L-B) — Schmid 2019 VR-MCCFR tabular baseline
+        # control variate. ``advantage_baseline="none"`` keeps Day 4 behaviour
+        # exactly. ``"tabular_ema"`` maintains a per-(player, infoset_key,
+        # action) EMA of observed counterfactual values v(I, a) and applies
+        # the Schmid 2019 Eq. 6 correction to regret targets:
+        #     r̂(I, a) = (v(I, a) - b(I, a)) - (v(I) - b̄(I))
+        #             = r_legacy(I, a) - b(I, a) + b̄(I)
+        # where b̄(I) = Σ_a σ(a|I) · b(I, a). Lemma 1 of Schmid 2019:
+        # E[r̂] = E[r_legacy] under the same σ^t, so the CFR convergence
+        # proof carries over while the per-sample variance drops by
+        # ≈ Var(b) once the baseline tracks v.
+        if advantage_baseline not in ("none", "tabular_ema"):
+            raise ValueError(
+                f"advantage_baseline must be 'none' or 'tabular_ema', "
+                f"got {advantage_baseline!r}"
+            )
+        self.advantage_baseline = advantage_baseline
+        self.baseline_alpha = float(baseline_alpha)
+        # Per-player dict mapping infoset_key → baseline vector. Cold-start
+        # values default to zero on first visit, which makes the correction
+        # a no-op until at least one observation lands in the (I, a) cell.
+        self._baselines: dict[int, dict[str, np.ndarray]] = {0: {}, 1: {}}
 
         self.iteration: int = 0
 
@@ -220,8 +245,33 @@ class DeepCFR:
             node_value = float(strategy @ action_values)
 
             # Regret target (masked). Brown 2019 Eq.(4): sampled regret =
-            # action_values - node_value at I.
-            regret_target = (action_values - node_value) * mask_f
+            # action_values - node_value at I. Optionally Schmid 2019
+            # baseline-corrected (Phase 3 Day 5 Step 5 L-B): the corrected
+            # target shares the same expectation but lower variance.
+            if self.advantage_baseline == "tabular_ema":
+                key = state.infoset_key
+                bdict = self._baselines[updating_player]
+                if key not in bdict:
+                    bdict[key] = np.zeros(self.n_actions, dtype=np.float64)
+                b = bdict[key]
+                # b̄(I) = Σ_a σ(a|I) · b(I, a) under current strategy
+                # (illegal slots have σ=0, so summing over n_actions is
+                # equivalent to summing over legal_actions).
+                b_bar = float(strategy @ b)
+                regret_target = (
+                    (action_values - b) - (node_value - b_bar)
+                ) * mask_f
+                # EMA update on legal actions only — illegal entries stay
+                # at the initial 0.0 to avoid contaminating b̄.
+                alpha = self.baseline_alpha
+                for a_idx in range(self.n_actions):
+                    if mask_f[a_idx] > 0.0:
+                        b[a_idx] = (
+                            (1.0 - alpha) * b[a_idx]
+                            + alpha * action_values[a_idx]
+                        )
+            else:
+                regret_target = (action_values - node_value) * mask_f
 
             # Push (encoding, regret_vector, T) into advantage buffer.
             encoding_t = torch.from_numpy(encoding_np).to(self.device)
@@ -372,6 +422,26 @@ class DeepCFR:
                 epoch_loss_sum / epoch_loss_n if epoch_loss_n > 0 else float("nan")
             )
 
+        # Tier 2 logging (Day 5 Step 5): baseline aggregate stats when L-B
+        # is active. Helps post-hoc EMA-α calibration and cold-start audit.
+        baseline_stats: dict[str, float] = {}
+        if self.advantage_baseline == "tabular_ema":
+            bdict = self._baselines[player]
+            n_keys = len(bdict)
+            if n_keys > 0:
+                stacked = np.stack(list(bdict.values()))
+                baseline_stats = {
+                    "baseline_n_keys": float(n_keys),
+                    "baseline_abs_mean": float(np.abs(stacked).mean()),
+                    "baseline_var": float(stacked.var()),
+                }
+            else:
+                baseline_stats = {
+                    "baseline_n_keys": 0.0,
+                    "baseline_abs_mean": 0.0,
+                    "baseline_var": 0.0,
+                }
+
         self.train_history.append({
             "iter": int(self.iteration),
             "net": "advantage",
@@ -383,6 +453,7 @@ class DeepCFR:
             "target_abs_mean": target_abs_mean,
             "target_abs_std": target_abs_std,
             "grad_norm_max": grad_norm_max,
+            **baseline_stats,
         })
 
     def _train_strategy_net(self) -> None:

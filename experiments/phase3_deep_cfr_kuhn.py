@@ -85,6 +85,9 @@ def _train_until(
         bucket[f"train/{tag}_target_abs_std"] = float(ev["target_abs_std"])  # type: ignore[arg-type]
         bucket[f"train/{tag}_grad_norm_max"] = float(ev["grad_norm_max"])  # type: ignore[arg-type]
         bucket[f"train/{tag}_n_samples"] = float(ev["n_samples"])  # type: ignore[arg-type]
+        for key in ("baseline_n_keys", "baseline_abs_mean", "baseline_var"):
+            if key in ev:
+                bucket[f"train/{tag}_{key}"] = float(ev[key])  # type: ignore[arg-type]
     for it in sorted(by_iter):
         wandb.log(by_iter[it], step=it)
 
