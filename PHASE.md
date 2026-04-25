@@ -5,8 +5,8 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 6 Huber loss REJECTED (2026-04-25 저녁)**: Primary A early-iter peak (T=100 +7.6σ) → T=500 baseline 회귀 (+1.13σ noise within), σ̄_expl **+10.1σ catastrophically worse** (over-regularization). Hypothesis (b) target variance "Huber 단독" 공략 reject. Day 7 axis = (e) Brown 2019 defaults (advantage_epochs ↑) 또는 strategy-side direct attack.
-**Day 5 Steps 1-5 완료 (2026-04-25 오후)**: 6 commits, σ_seed=0.010, L-B quarantine, 가설 (c)/(d)/(f) sealed reject.
+**Phase**: 3 진행 중 — **Day 7 (e) advantage_epochs 4→10 marginal (2026-04-25 늦은 저녁)**: Primary A +1.45σ borderline, Primary B +2.22σ significant, σ̄_expl -0.45σ noise. 3개 다른 axes (Cap / Huber / epochs ↑) 모두 Primary A를 **0.25-0.27 floor 너머로 못 움직임** → **architectural limit 강력 증거**. Phase 3 metric 재정의 mentor 결정 영역 진입.
+**Day 5/6 history**: σ_seed=0.010, L-B quarantine, Huber transient/over-reg, 가설 (c)/(d)/(f) sealed reject, (b') framing rejected (unidirectional dependency).
 **핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
 **테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
 **Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
@@ -33,6 +33,94 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 7 — (e) advantage_epochs 4→10 borderline + 3-axis convergence 패턴 (2026-04-25 늦은 저녁)
+
+> 1 commit (`3161e85` PHASE.md #14 정정 + #15 신규 자산). Run 110.0min, FINAL T=500 prim_A=0.2621.
+
+#### 설계 (멘토 승인, axis isolation)
+
+CLI override만: `deep_cfr.advantage_epochs=10` (strategy_epochs=4 유지, 변수 1개 isolation). Form/structure 변경 0 — Day 5 L-B / Day 6 Huber 부작용 회피. 코드 변경 없음.
+
+#### 실측 결과 (Leduc T=500 K=100 seed=42, 110.0min)
+
+| T | prim_A | prim_B | σ̄_expl | dt_deep |
+|---|---|---|---|---|
+| 50 | 0.2840 | 0.8274 | 219.1 | 159.6s |
+| 100 | 0.2567 | 0.8253 | 228.5 | 446s |
+| 250 | 0.2462 | 0.8114 | 189.6 | 2112s |
+| **500** | **0.2621** | **0.8257** | **177.4** | 3783s |
+
+per-iter time: Day 3 baseline 60min × 1.83x ratio (10 epoch / 4 epoch advantage train + same strategy) ≈ 110min — 정확 일치.
+
+#### Multi-seed effect-size (Day 5 σ_seed=0.0100 reference)
+
+| Metric @ T=500 | (e) | 5-seed mean | σ_seed | Effect Size | 판정 |
+|---|---|---|---|---|---|
+| Primary A | 0.2621 | 0.2476 | 0.0100 | **+1.45σ** | borderline (cutoff 1.5 직전) |
+| Primary B | 0.8257 | 0.7973 | 0.0128 | **+2.22σ** | borderline significant |
+| σ̄_expl | 177.4 | 181.6 | 9.27 | **-0.45σ** | noise level |
+
+#### Trajectory — 또 transient peak 패턴
+
+| T | Primary A | Δ vs 5-seed mean |
+|---|---|---|
+| 50 | 0.2840 | +1.4σ |
+| 100 | 0.2567 | +2.2σ (peak) |
+| 250 | 0.2462 | **-1.5σ (below)** |
+| 500 | 0.2621 | +1.45σ |
+
+V-shape (Day 3 baseline 0.246→0.259→0.255와 유사). (e) systematically better가 아닌 **noisier in same regime**.
+
+#### 핵심 발견 — Primary A architectural limit 강력 증거 (Day 7 정식 등록)
+
+**3 axes scan of single-seed Primary A intervention**:
+
+| Axis | 시도 | Δ Primary A vs baseline | Effect Size | 결론 |
+|---|---|---|---|---|
+| Cap (3×64→4×128) | Day 4 | -0.008 | 0.8σ | noise within |
+| Huber (MSE→robust loss) | Day 6 | +0.011 | 1.13σ | transient peak +7.6σ → 회귀 |
+| **(e) advantage_epochs 4→10** | **Day 7** | **+0.0145** | **1.45σ** | **borderline** |
+
+**모든 axes에서 Primary A 0.25-0.27 floor**. 3 다른 mechanism (capacity / loss form / training budget) 모두 0.27 못 넘김 → **Brown 2019 Deep CFR on Leduc의 advantage net Pearson against tabular cumulative regret는 ~0.25-0.27이 architectural ceiling**으로 보임. Kuhn 0.82 (12 infosets) → Leduc 0.27 (288 infosets)의 게임 scale-dependent **fundamental approximation gap** 가설 강화.
+
+#### Strategy-side는 여전히 robust
+
+| Axis | Δ σ̄_expl | Effect Size on σ̄_expl |
+|---|---|---|
+| Cap (3×64→4×128) | -23% | **4.5σ** (Day 5 multi-seed 확증) |
+| (e) epoch 4→10 | -2% | 0.45σ noise |
+
+Cap effect on σ̄_expl는 robust significant. (e) effect on σ̄_expl는 noise. **Strategy axis = production metric (σ̄_expl) 공략의 main 도구**.
+
+#### Educational asset #16 (Day 7 신규)
+
+"Brown 2019 Deep CFR의 Primary A (advantage net Pearson against tabular cumulative regret)는 게임 scale-dependent **architectural ceiling**: Kuhn 0.82 (12 infosets, ratio 389:1) vs Leduc 0.27 (288 infosets, ratio 16-105:1). 3 다른 axes (capacity/loss form/training budget) 모두 0.27 못 넘김. **Network approximation의 fundamental gap이 게임 크기와 함께 grow**. Phase 4 HUNL (∞ infosets)에서 Primary A는 더 낮은 ceiling 예상 (potential 0.10-0.20 range). **GREEN metric으로 Primary A 사용은 game-scale-aware 정의 필요**."
+
+#### Phase 3 metric 재정의 — Day 7 결과로 진지하게 진입 권장
+
+**증거 종합** (Day 4-7 4 sessions):
+- Primary A 0.27 ceiling: 3 axes scan, single-seed σ_seed=0.010 noise band 안에서 정체
+- σ̄_expl Strategy-side: 4.5σ Cap effect 확증
+- Primary B Strategy-side: 2.7σ Cap, 2.2σ epoch effect
+
+**클코 권장 옵션 D (mentor 사전 등록 4 옵션 중)**: **Strategy-only GREEN (σ̄_expl < 10 mbb/g)**
+
+이유:
+- σ̄_expl는 production metric (user-facing GREEN과 직접 일치)
+- Primary A는 architectural limit 발견된 diagnostic metric
+- Strategy axis가 productive (Cap/epoch 모두 robust direction)
+- Primary A를 GREEN gate에서 제외 → diagnostic으로 demote
+
+대안: 옵션 B (Primary A > 0.30로 GREEN 약화) — Leduc-tuned, architectural 인정.
+
+Day 4-7 collective evidence가 강해서 metric 재정의는 evidence-based justified. mentor 결정 위임.
+
+#### Day 7 자가 audit (10번째 클코)
+
+**3-axis convergence 패턴 정식 등록**: 단일 axis (Cap, Huber, epochs)으로 Primary A 못 넘는 evidence 4 sessions accumulated. Day 4 single-seed retraction 시점에선 1 axis 결과만 있었음. Day 7에 3 axes confirmed → architectural limit 가설이 **잠정** → **strong evidence**로 promotion 가능. 멘토 우려 (Primary A 0.25 floor architectural)가 정량적으로 sustained.
+
+자율 audit 누계: 클코 10건 (멘토 5건). Phase 3 가설 트리 거의 종결.
 
 ### Phase 3 Day 6 — Huber loss (#2b-1) REJECTED + transient effect 발견 (2026-04-25 저녁)
 
