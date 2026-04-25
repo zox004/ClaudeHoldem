@@ -5,7 +5,8 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 5 Steps 1-5 완료 (2026-04-25 오후)**: 6 commits, **377 unit GREEN**.
+**Phase**: 3 진행 중 — **Day 6 Huber loss REJECTED (2026-04-25 저녁)**: Primary A early-iter peak (T=100 +7.6σ) → T=500 baseline 회귀 (+1.13σ noise within), σ̄_expl **+10.1σ catastrophically worse** (over-regularization). Hypothesis (b) target variance "Huber 단독" 공략 reject. Day 7 axis = (e) Brown 2019 defaults (advantage_epochs ↑) 또는 strategy-side direct attack.
+**Day 5 Steps 1-5 완료 (2026-04-25 오후)**: 6 commits, σ_seed=0.010, L-B quarantine, 가설 (c)/(d)/(f) sealed reject.
 **핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
 **테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
 **Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
@@ -32,6 +33,92 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 6 — Huber loss (#2b-1) REJECTED + transient effect 발견 (2026-04-25 저녁)
+
+> 1 commit: `5fdd477` (Huber 구현 + 8 tests). Run 65.9 min, FINAL T=500 prim_A=0.2589.
+
+#### 설계 (멘토 승인 9-step + δ data-grounded)
+
+`advantage_loss ∈ {"mse", "huber"}` opt-in (default mse, Day 4 path 변경 0). `huber_delta` 옵션 A (고정, 데이터 측정 후). 5-iter Leduc K=100 smoke로 `target_abs_mean=2.58, target_abs_std=3.31` 측정 → **δ=2.5** (50/50 quadratic/linear regime). PyTorch default δ=1.0 사용 시 74% sample이 L1 영역 → 사실상 L1과 동치였을 risk 회피.
+
+8 신규 unit tests (TestDeepCFRHuberLoss): default mse, invalid value/delta rejected, target_abs_mean MSE와 동일 (target stat 변경 0 — #2a/#2b 분리 확증), loss numerics differ, seed reproducibility. **385 unit GREEN**.
+
+#### 실측 결과 (Leduc T=500 K=100 seed=42, 65.9분)
+
+| T | prim_A | prim_B | σ̄_expl | r1_pure | r2_pure |
+|---|---|---|---|---|---|
+| 50 | **0.3628** | 0.7203 | 315.5 | 0.195 | 0.241 |
+| 100 | **0.2848** | 0.7428 | 264.3 | 0.307 | 0.221 |
+| 250 | 0.2567 | 0.7880 | 241.3 | **0.403** | 0.183 |
+| **500** | **0.2589** | **0.7675** | **275.4** | **0.412** | 0.192 |
+
+#### Multi-seed σ_seed 기반 effect-size 판정
+
+| Metric @ T=500 | Huber | 5-seed mean (Day 5) | σ_seed | **Effect Size** | 판정 |
+|---|---|---|---|---|---|
+| Primary A | 0.2589 | 0.2476 | 0.0100 | **+1.13σ** | marginal (within noise) |
+| Primary B | 0.7675 | 0.7973 | 0.0128 | **-2.29σ** | borderline negative |
+| σ̄_expl | 275.4 | 181.6 | 9.27 | **+10.1σ** | **CATASTROPHICALLY WORSE** |
+
+**판정**: Day 6 #2b-1 Huber 공략 **REJECTED**.
+- Primary A는 noise 안 (Δ +1.13σ < cutoff 3σ).
+- σ̄_expl는 10.1σ 악화 — production GREEN metric 정반대 방향.
+- Net effect: **Huber HURTS the system**.
+
+#### Trajectory 분석 — Transient peak
+
+| T | Primary A (Huber) | 5-seed mean | Effect Size |
+|---|---|---|---|
+| 50 | 0.3628 | 0.2489 | +4.5σ |
+| 100 | 0.2848 | 0.2453 | **+7.6σ ← peak** |
+| 250 | 0.2567 | 0.2604 | -0.4σ |
+| 500 | 0.2589 | 0.2476 | +1.13σ |
+
+→ **Primary A gain은 transient (early peak T=100 +7.6σ → T=500 baseline 회귀)**. Huber가 학습 dynamics을 바꾸지만 수렴 floor는 동일.
+
+#### Mechanism 추정 (자가 진단)
+
+**Over-regularization**: Huber softens gradient for large residuals (|residual| > δ). Outlier regret signals → linear gradient (smaller). Advantage net이 outlier에 less aggressive → output 분포 좁아짐 → regret-matching σ가 uniform에 가까워짐 → strategy buffer samples 가 균일에 가까움 → strategy net Pearson against tabular σ̄ 떨어짐 → σ̄_expl 폭발.
+
+**또는**: Huber가 loss landscape의 sharp minimum 회피 → wider basin (variance ↓) → less "fit" → under-fit symptom.
+
+#### Educational asset #13 (Day 6 신규)
+
+"Loss form change (MSE→Huber)는 **transient effect** (early-iter peak)을 만들지만 수렴 후 동일 floor. 알고리즘 변경의 **'sustained vs transient' 구분 필수** — convergence smoke (T=500)이 transient 노출에 결정적. T=100 결과만 보면 +7.6σ로 misread할 수 있음. T=500까지 끝까지 봐야 함."
+
+#### Educational asset #14 (Day 6 신규)
+
+"Single-axis variance reduction (control variate L-B / robust loss Huber) 둘 다 Primary A 단독 공략으로 시도되었으나 production metric (σ̄_expl)에 **negative side effect** (L-B: 770 catastrophic, Huber: +10σ). Advantage net과 Strategy net이 **shared traversal flow**로 strongly coupled — advantage net의 학습 dynamics 변경은 strategy buffer sample을 변경 → strategy net에도 propagate. 'Primary A만 공략'은 isolated axis 아님."
+
+#### Hypothesis tree status (Day 6 종료)
+
+| 가설 | 내용 | 상태 |
+|---|---|---|
+| (a) network capacity | Day 4 single-seed | **noise within (Day 5 σ_seed=0.010 vs Δ=0.008)** |
+| (b) target variance | Day 5 L-B | **L-B impl failed, Huber transient/over-reg, 단독 공략 부적합** |
+| (b') | target variance + strategy isolation | **NEW**: advantage·strategy decouple 필요 (axis 14) |
+| (c) self-corr noise | Step 3 | sealed reject |
+| (d) metric mismatch | Step 4 d1 | rejected |
+| (e) Brown 2019 defaults | future | **pending — Day 7 후보 #1** |
+| (f) buffer linear weighting | Step 4 d1 | rejected |
+
+#### Day 7 axis 옵션 (멘토 결정 영역)
+
+| 옵션 | Cost | 핵심 |
+|---|---|---|
+| **(e) advantage_epochs 4 → 10** | 3줄 + 65min run | training budget 부족 가설, axis isolation 깔끔, Huber/L-B 부작용 없는 직접 공략 |
+| **Strategy-side direct** (Cap-Strategy + tabular σ̄_expl 측정) | yaml + 65min | σ̄_expl 4.5σ Cap effect 직접 활용, Primary A 보류 |
+| **(b') decouple advantage·strategy buffers** | ~30줄 + 65min | strategy net이 advantage net의 변화에 영향 안 받게, Huber/L-B retry 가능 |
+| **(a) multi-seed Cap 재검증** | ~12h | 가설 (a) 정밀 검증, 비쌈 |
+
+**클코 1순위 추천**: **(e) advantage_epochs 4 → 10**. Huber/L-B 두 실패의 공통 원인 (sustained convergence failure)을 우회 — training budget 직접 ↑로 advantage net이 수렴 깊이 도달하는지 검증. 변경 최소.
+
+#### 자율 audit (Day 6 클코 8번째)
+
+**δ data-grounded 결정**: PyTorch default δ=1.0 → 74% sample이 L1 영역 = 사실상 L1과 동치. Day 5 H Tier 1 logging 덕분에 target_abs_mean=2.58 사전 측정 가능 → δ=2.5 결정. 멘토 옵션 A "target std 측정 후 하드코딩" 정확 적용. PyTorch default 그대로 썼다면 결과 해석에 추가 ambiguity 있을 수 있었음.
+
+자율 audit 누계: 클코 8건 (멘토 4건). Phase 3 자가 발견 패턴 강화.
 
 ### Phase 3 Day 5 — σ_seed 정량 + L-B 실패 + 가설 트리 정정 (2026-04-25 오후)
 
