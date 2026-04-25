@@ -153,6 +153,12 @@ class DeepCFR:
 
         self.iteration: int = 0
 
+        # Phase 3 Day 5 H Tier 1 logging (2026-04-25). Each advantage/strategy
+        # train call appends one event with per-epoch loss curve + target/grad
+        # statistics. Harness reads after train() to forward to W&B at any
+        # granularity (per-epoch β default in current harness usage).
+        self.train_history: list[dict[str, object]] = []
+
     # -------------------------------------------------------------- public API
 
     def train(self, iterations: int) -> None:
@@ -306,7 +312,14 @@ class DeepCFR:
 
         features, targets, weights = buf.sample_all()
         batch = min(self.batch_size, n)
+        # Day 5 H Tier 1 stats — recorded over the entire training call.
+        target_abs_mean = float(targets.abs().mean().detach().item())
+        target_abs_std = float(targets.abs().std(unbiased=False).detach().item())
+        loss_per_epoch: list[float] = []
+        grad_norm_max = 0.0
         for _ in range(self.advantage_epochs):
+            epoch_loss_sum = 0.0
+            epoch_loss_n = 0
             perm = torch.randperm(n, device=self.device)
             for start in range(0, n, batch):
                 idx = perm[start:start + batch]
@@ -347,8 +360,30 @@ class DeepCFR:
 
                 optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(net.parameters(), _GRAD_CLIP_NORM)
+                gn = float(
+                    nn.utils.clip_grad_norm_(net.parameters(), _GRAD_CLIP_NORM)
+                )
+                if gn > grad_norm_max:
+                    grad_norm_max = gn
                 optimizer.step()
+                epoch_loss_sum += float(loss.detach().item())
+                epoch_loss_n += 1
+            loss_per_epoch.append(
+                epoch_loss_sum / epoch_loss_n if epoch_loss_n > 0 else float("nan")
+            )
+
+        self.train_history.append({
+            "iter": int(self.iteration),
+            "net": "advantage",
+            "player": int(player),
+            "n_samples": int(n),
+            "loss_per_epoch": loss_per_epoch,
+            "loss_initial": loss_per_epoch[0] if loss_per_epoch else float("nan"),
+            "loss_final": loss_per_epoch[-1] if loss_per_epoch else float("nan"),
+            "target_abs_mean": target_abs_mean,
+            "target_abs_std": target_abs_std,
+            "grad_norm_max": grad_norm_max,
+        })
 
     def _train_strategy_net(self) -> None:
         """Re-init + fit ``strategy_net`` on ``strategy_buffer`` via
@@ -381,7 +416,14 @@ class DeepCFR:
         features, targets, weights, masks = buf.sample_all_with_masks()
         batch = min(self.batch_size, n)
         neg_inf = torch.tensor(float("-inf"), device=self.device)
+        # Day 5 H Tier 1 stats — strategy targets are simplex (mean ≈ 1/legal_n).
+        target_abs_mean = float(targets.abs().mean().detach().item())
+        target_abs_std = float(targets.abs().std(unbiased=False).detach().item())
+        loss_per_epoch: list[float] = []
+        grad_norm_max = 0.0
         for _ in range(self.strategy_epochs):
+            epoch_loss_sum = 0.0
+            epoch_loss_n = 0
             perm = torch.randperm(n, device=self.device)
             for start in range(0, n, batch):
                 idx = perm[start:start + batch]
@@ -411,5 +453,26 @@ class DeepCFR:
 
                 optimizer.zero_grad()
                 loss.backward()  # type: ignore[no-untyped-call]
-                nn.utils.clip_grad_norm_(net.parameters(), _GRAD_CLIP_NORM)
+                gn = float(
+                    nn.utils.clip_grad_norm_(net.parameters(), _GRAD_CLIP_NORM)
+                )
+                if gn > grad_norm_max:
+                    grad_norm_max = gn
                 optimizer.step()
+                epoch_loss_sum += float(loss.detach().item())
+                epoch_loss_n += 1
+            loss_per_epoch.append(
+                epoch_loss_sum / epoch_loss_n if epoch_loss_n > 0 else float("nan")
+            )
+
+        self.train_history.append({
+            "iter": int(self.iteration),
+            "net": "strategy",
+            "n_samples": int(n),
+            "loss_per_epoch": loss_per_epoch,
+            "loss_initial": loss_per_epoch[0] if loss_per_epoch else float("nan"),
+            "loss_final": loss_per_epoch[-1] if loss_per_epoch else float("nan"),
+            "target_abs_mean": target_abs_mean,
+            "target_abs_std": target_abs_std,
+            "grad_norm_max": grad_norm_max,
+        })

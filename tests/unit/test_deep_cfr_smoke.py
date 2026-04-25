@@ -256,3 +256,79 @@ class TestDeepCFRNetworkForwardBackward:
             assert torch.isfinite(p).all(), "advantage_nets[1] has NaN/Inf param"
         for p in trainer.strategy_net.parameters():
             assert torch.isfinite(p).all(), "strategy_net has NaN/Inf param"
+
+
+# =============================================================================
+# H Tier 1 logging — train_history captures per-call training stats
+# =============================================================================
+class TestDeepCFRTrainHistory:
+    """Phase 3 Day 5 H Tier 1: train_history records loss/grad/target stats."""
+
+    def test_train_history_starts_empty(self) -> None:
+        trainer = _make_kuhn_trainer()
+        assert trainer.train_history == []
+
+    def test_train_history_records_three_events_per_iter(self) -> None:
+        """One iter = 2 advantage_p (p∈{0,1}) + 1 strategy = 3 events."""
+        trainer = _make_kuhn_trainer()
+        trainer.train(2)
+        assert len(trainer.train_history) == 6
+        nets_seen = [(ev["iter"], ev["net"]) for ev in trainer.train_history]
+        assert nets_seen == [
+            (1, "advantage"), (1, "advantage"), (1, "strategy"),
+            (2, "advantage"), (2, "advantage"), (2, "strategy"),
+        ]
+
+    def test_advantage_event_has_required_keys(self) -> None:
+        trainer = _make_kuhn_trainer()
+        trainer.train(1)
+        adv = next(e for e in trainer.train_history if e["net"] == "advantage")
+        for key in (
+            "iter", "net", "player", "n_samples", "loss_per_epoch",
+            "loss_initial", "loss_final",
+            "target_abs_mean", "target_abs_std", "grad_norm_max",
+        ):
+            assert key in adv, f"advantage event missing {key!r}"
+
+    def test_strategy_event_has_no_player_key(self) -> None:
+        """Strategy net is shared (Brown 2019); event has no player field."""
+        trainer = _make_kuhn_trainer()
+        trainer.train(1)
+        strat = next(e for e in trainer.train_history if e["net"] == "strategy")
+        assert "player" not in strat
+
+    def test_loss_per_epoch_length_matches_advantage_epochs(self) -> None:
+        trainer = DeepCFR(
+            game=KuhnPoker(), n_actions=2, encoding_dim=6,
+            traversals_per_iter=10, batch_size=8,
+            advantage_epochs=3, strategy_epochs=2,
+            seed=42,
+        )
+        trainer.train(1)
+        adv = next(e for e in trainer.train_history if e["net"] == "advantage")
+        strat = next(e for e in trainer.train_history if e["net"] == "strategy")
+        assert len(adv["loss_per_epoch"]) == 3
+        assert len(strat["loss_per_epoch"]) == 2
+
+    def test_logged_stats_are_finite_and_nonnegative(self) -> None:
+        trainer = _make_kuhn_trainer()
+        trainer.train(2)
+        for ev in trainer.train_history:
+            assert math.isfinite(float(ev["loss_initial"]))
+            assert math.isfinite(float(ev["loss_final"]))
+            assert math.isfinite(float(ev["target_abs_mean"]))
+            assert float(ev["target_abs_mean"]) >= 0.0
+            assert math.isfinite(float(ev["grad_norm_max"]))
+            assert float(ev["grad_norm_max"]) >= 0.0
+            assert float(ev["n_samples"]) > 0
+
+    def test_strategy_target_abs_mean_close_to_simplex_average(self) -> None:
+        """For 2-action Kuhn, strategy targets are simplex (probs sum to 1
+        with both legal). |target| mean = exact 0.5 by construction —
+        sanity check that target_abs_mean wires the right tensor."""
+        trainer = _make_kuhn_trainer()
+        trainer.train(1)
+        strat = next(e for e in trainer.train_history if e["net"] == "strategy")
+        # Both Kuhn actions always legal → each prob is 0.5 on uniform
+        # init, so |target| mean must be exactly 0.5.
+        assert abs(float(strat["target_abs_mean"]) - 0.5) < 1e-6

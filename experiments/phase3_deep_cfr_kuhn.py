@@ -64,9 +64,29 @@ def _train_until(
     """
     t0 = time.perf_counter()
     delta_deep = target_T - deep.iteration
+    history_start = len(deep.train_history)
     if delta_deep > 0:
         deep.train(delta_deep)
     deep_sec = time.perf_counter() - t0
+
+    # Phase 3 Day 5 H Tier 1 logging — see phase3_deep_cfr_leduc._train_until
+    # for full comment. Aggregates 3 events/iter into one wandb.log at
+    # step=iter, so the train/* curves merge with checkpoint metrics.
+    new_events = deep.train_history[history_start:]
+    by_iter: dict[int, dict[str, float]] = {}
+    for ev in new_events:
+        it = int(ev["iter"])  # type: ignore[arg-type]
+        bucket = by_iter.setdefault(it, {})
+        net = str(ev["net"])
+        tag = f"adv_p{int(ev['player'])}" if net == "advantage" else "strat"  # type: ignore[arg-type]
+        bucket[f"train/{tag}_loss_initial"] = float(ev["loss_initial"])  # type: ignore[arg-type]
+        bucket[f"train/{tag}_loss_final"] = float(ev["loss_final"])  # type: ignore[arg-type]
+        bucket[f"train/{tag}_target_abs_mean"] = float(ev["target_abs_mean"])  # type: ignore[arg-type]
+        bucket[f"train/{tag}_target_abs_std"] = float(ev["target_abs_std"])  # type: ignore[arg-type]
+        bucket[f"train/{tag}_grad_norm_max"] = float(ev["grad_norm_max"])  # type: ignore[arg-type]
+        bucket[f"train/{tag}_n_samples"] = float(ev["n_samples"])  # type: ignore[arg-type]
+    for it in sorted(by_iter):
+        wandb.log(by_iter[it], step=it)
 
     t0 = time.perf_counter()
     delta_van = target_T - vanilla.iteration
