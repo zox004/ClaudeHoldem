@@ -5,9 +5,9 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 8 Cap+epoch saturation (2026-04-26 새벽)**: σ̄_expl 141.6 (4.31σ vs 5-seed mean), **Day 4 Cap-alone 139.4와 effectively same floor**. (e) 추가 효과 없음 — Cap saturation 발견. Primary B 4.15σ stack-up (strategy quality는 가산), Primary A 0.05σ (architectural floor 재확증). σ̄_expl monotone decreasing 보장 깨짐 (T=250 139 → T=500 141.6, strategy_net averaging estimator noise floor — 자산 #17 후보). Day 9 axis = T/K/Cap further 중 결정.
-**Phase 3 metric v5 (2026-04-25)**: GREEN gate = σ̄_expl < 10 mbb/g 단독. Primary A diagnostic-only.
-**Day 5-7 history**: σ_seed=0.010, L-B quarantine, Huber transient/over-reg, (e) marginal, Strategy-side Cap 4.5σ on σ̄_expl robust.
+**Phase**: 3 진행 중 — **Day 9 T=2000 Adverse + GREEN < 10 unreachable confirmed (2026-04-26 새벽)**: σ̄_expl T=500 band 147.7 → T=1000 band 149.7 → T=2000 band **166.2** (T 축 productive 아님, 오히려 +18 worse). σ within-band grows 6.6→10.5→19.6 (estimator noise floor T에 비례). Mechanism: reservoir buffer over-saturation + linear CFR weighting at large T. **자산 #18 신규**: "Brown 2019 CFR theory σ̄_expl→0 as T→∞는 EXACT CFR 가정, Deep CFR에 strict 적용 안 됨". GREEN < 10 사실상 unreachable.
+**Phase 3 metric v5 (Day 7)**: GREEN gate = σ̄_expl < 10 mbb/g 단독. Day 9 evidence 기반 **GREEN 약화 v6 결정 시점**.
+**Day 4-8 history**: σ_seed=0.010, L-B quarantine, Huber transient/over-reg, (e) marginal, Cap saturation (140 floor), Strategy-side Cap 4.5σ robust.
 **핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
 **테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
 **Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
@@ -34,6 +34,81 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 9 — T=2000 multi-checkpoint, T axis ADVERSE (2026-04-26 새벽)
+
+> 0 commits (yaml override only). Run 7.26h (예상 6.2h, 17% over). FINAL T=2000 single σ̄_expl=188.1, T=2000 anchor band mean=166.2.
+
+#### 설계 (멘토 design 변형 채택)
+
+CLI override + 13-point dense checkpoints: `[450, 475, 500, 525, 550, 950, 975, 1000, 1025, 1050, 1900, 1950, 2000]`. 3 anchor T (500/1000/2000) ±50 iter band averaging으로 자산 #11 (σ̄_expl non-monotone) 직접 활용. Day 4 setting (4×128, eps=4) 베이스 — Day 8에서 (e) saturation 발견으로 (e) 제외, T 축 isolation.
+
+#### Reproducibility 확증
+
+Day 9 T=500 single = **139.4427** (4 decimals exact match Day 4 T=500 = 139.4427). prim_A=0.2470, prim_B=0.8232, tert=0.2677 모두 동일. **deterministic given seed + config 검증**.
+
+#### 3-anchor T-axis 결과
+
+| Anchor | Mean σ̄_expl | σ within-band | Δ vs T=500 mean |
+|---|---|---|---|
+| T=500 | **147.7** | 6.6 | 0 |
+| T=1000 | **149.7** | 10.5 | +2.0 (noise) |
+| T=2000 | **166.2** | **19.6** | **+18.5 (WORSE)** |
+
+T=500 anchor band: {155.7, 148.9, 139.4, 151.5, 142.8} → mean 147.7, σ 6.6
+T=1000 anchor band: {133.3, 157.3, 150.9, 147.0, 160.1} → mean 149.7, σ 10.5
+T=2000 anchor band: {160.3, 150.2, 188.1} → mean 166.2, σ 19.6
+
+#### H4 진입: T가 noise 추가 (멘토 cutoff > 145 zone)
+
+**핵심 발견**: T=500 → T=2000 (4× 확장) σ̄_expl이 +18.5 mbb/g 증가, within-band σ가 3× 증가. **T axis ADVERSE in current setup, not productive.**
+
+#### Mechanism 추정
+
+1. **Reservoir buffer over-saturation**: T=2000 = ~600k samples seen, buffer 100k → 6× over capacity → heavy reservoir eviction.
+2. **Linear CFR weighting at large T**: `iter_weight=t`로 late-iter samples 6× more weight. Late σ_t는 already converged-noisy → buffer가 noisy 분포로 dominated.
+3. **Strategy_net averaging variance grows**: late-iter σ samples noise propagate to σ̄ output.
+
+이는 **Brown 2019 CFR theorem (σ̄ → Nash as T → ∞)**의 EXACT CFR 가정이 Deep CFR + reservoir + linear weighting 결합에서 깨짐을 보여줌.
+
+#### Educational asset #18 (Day 9 신규)
+
+"Brown 2019 CFR convergence theorem은 EXACT CFR 가정. **Deep CFR with reservoir buffer + linear CFR weighting**은 large T에서 σ̄_expl 비-monotone, 심지어 ADVERSE 가능 (Day 9: T=500 band 148 → T=2000 band 166). Mechanism: buffer over-saturation, late-sample weighting bias, estimator variance grows with T. **Phase 4-5 HUNL: T 무한 확장 = σ̄_expl 개선 가정 금물**, sweet spot 찾기 필요. T=500-1000 가 현재 architecture의 productive range, T>1000은 buffer dynamics가 advantage 잃음."
+
+#### 자가 audit (12번째 클코)
+
+내 사전 예측 "T extension이 -30~50 mbb/g 감소" **틀림**. Day 9 실측 +18 mbb/g (T=2000 band vs T=500 band). Brown 2019 CFR theory를 Deep CFR에 무비판 적용한 가정 오류 — Day 8 #11 audit (σ̄_expl monotone 가정 wrong)의 더 심한 case가 large T에서 발현. 자산 #18로 정식화.
+
+자율 audit 누계: 클코 12건 (멘토 5건). Phase 3 σ̄_expl axis 탐색 거의 종결 — K axis 미테스트만 남음.
+
+#### Hypothesis tree status (Day 9 종료)
+
+| 가설 | 상태 |
+|---|---|
+| (a) capacity | saturated at 4×128 |
+| (b)/(b')/(c)/(d)/(f) | rejected/sealed |
+| (e) Brown 2019 defaults | saturates with Cap |
+| **T axis** | **EXHAUSTED + ADVERSE** at large T |
+| K axis | **UNTESTED** (Brown 2019 A1=1000 vs ours 100, only remaining productive candidate) |
+| Cap further (5×256+) | untested |
+
+#### Phase 3 GREEN reality — < 10 mbb/g 사실상 unreachable
+
+Day 4-9 single+combined axes로 σ̄_expl floor ~140-150. T axis grows past 1000. **GREEN < 10 mbb/g (Day 5 baseline 181→ 18× 감소) 도달 거의 불가능**. K axis (untested) + Cap further (untested) 결합으로도 ~80-100 정도가 현실적 한계.
+
+#### Day 10 axis 옵션 (멘토 결정 영역, GREEN 약화 함께)
+
+**Step A: GREEN 약화 v6 결정**
+- < 100 mbb/g (medium 도달 가능성, K + Cap further 필요)
+- < 80 mbb/g (low-medium, aggressive multi-axis)
+- < 50 mbb/g (low, Brown 2019 Deep CFR Leduc 본질 한계 가능)
+
+**Step B: Day 10 axis (GREEN 약화 후)**
+- **K=300 또는 K=1000** (Brown 2019 default A1, ~3-8h, 분산 감소 untested)
+- **Cap 5×256** (~3-4h, Cap saturation 풀리는지)
+- **K + Cap 결합** (~6-8h, multi-axis stretch)
+
+**클코 1순위**: GREEN < 100 mbb/g + Day 10 K=300 단일 (~3h, Brown 2019 partial). 결과 보고 K=1000 또는 Cap 5×256 후속 결정.
 
 ### Phase 3 Day 8 — Cap+epoch saturation + Deep CFR σ̄_expl non-monotone 발견 (2026-04-26 새벽)
 
