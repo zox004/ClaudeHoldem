@@ -155,15 +155,33 @@ class DeepCFR:
 
         # Phase 3 Day 5 Step 5 (L-B) — Schmid 2019 VR-MCCFR tabular baseline
         # control variate. ``advantage_baseline="none"`` keeps Day 4 behaviour
-        # exactly. ``"tabular_ema"`` maintains a per-(player, infoset_key,
-        # action) EMA of observed counterfactual values v(I, a) and applies
-        # the Schmid 2019 Eq. 6 correction to regret targets:
-        #     r̂(I, a) = (v(I, a) - b(I, a)) - (v(I) - b̄(I))
-        #             = r_legacy(I, a) - b(I, a) + b̄(I)
-        # where b̄(I) = Σ_a σ(a|I) · b(I, a). Lemma 1 of Schmid 2019:
-        # E[r̂] = E[r_legacy] under the same σ^t, so the CFR convergence
-        # proof carries over while the per-sample variance drops by
-        # ≈ Var(b) once the baseline tracks v.
+        # exactly. ``"tabular_ema"`` was an attempt at Schmid 2019 Eq. 6
+        # correction at the updating-player infoset, but the run on Leduc
+        # T=50 (commit 6df43e2 follow-up) showed CATASTROPHIC regression:
+        # Primary A -0.027 (random floor), Primary B 0.275 (vs 0.81 baseline),
+        # σ̄_expl 770 mbb/g (vs 250). Two compounding bugs were identified
+        # AFTER the run:
+        #   (i) self-cancellation: α=0.1 EMA updated per-traversal makes
+        #       b(I, a) converge to v(I, a) within a single iteration's
+        #       100 traversals, so b̄(I) ≈ node_value and the corrected
+        #       regret target r̂ collapses to 0 — the network learns to
+        #       output zero advantages and regret-matching becomes
+        #       uniform-σ random play.
+        #   (ii) wrong node type: Schmid 2019's variance reduction is for
+        #        the non-updating-player branch where ε-smoothed *sampling*
+        #        introduces noise. At the updating-player infoset Deep CFR
+        #        evaluates ALL actions recursively (no sampling there), so
+        #        baseline subtraction adds bias without reducing variance.
+        # Both fixes are non-trivial:
+        #   (i) requires iter-frozen baseline snapshots
+        #   (ii) requires moving the correction to non-updating branches
+        #        with importance-weighted compensation (Schmid 2019 §5)
+        # Production must keep ``advantage_baseline="none"`` until both are
+        # implemented and the L-B path is re-validated end-to-end. The flag
+        # and code path are retained behind ``"tabular_ema"`` for ablation
+        # convenience, but USING IT BREAKS CONVERGENCE on the current
+        # implementation. Day 5 retracts L-B as a viable Step 5 axis;
+        # variance reduction is now pursued via #2b-1 (Huber loss) instead.
         if advantage_baseline not in ("none", "tabular_ema"):
             raise ValueError(
                 f"advantage_baseline must be 'none' or 'tabular_ema', "
