@@ -87,9 +87,18 @@
 
 "Loss form change (MSE→Huber)는 **transient effect** (early-iter peak)을 만들지만 수렴 후 동일 floor. 알고리즘 변경의 **'sustained vs transient' 구분 필수** — convergence smoke (T=500)이 transient 노출에 결정적. T=100 결과만 보면 +7.6σ로 misread할 수 있음. T=500까지 끝까지 봐야 함."
 
-#### Educational asset #14 (Day 6 신규)
+#### Educational asset #14 (Day 6 신규, Day 7 (b') design review로 표현 정정)
 
-"Single-axis variance reduction (control variate L-B / robust loss Huber) 둘 다 Primary A 단독 공략으로 시도되었으나 production metric (σ̄_expl)에 **negative side effect** (L-B: 770 catastrophic, Huber: +10σ). Advantage net과 Strategy net이 **shared traversal flow**로 strongly coupled — advantage net의 학습 dynamics 변경은 strategy buffer sample을 변경 → strategy net에도 propagate. 'Primary A만 공략'은 isolated axis 아님."
+"Single-axis variance reduction (control variate L-B / robust loss Huber) 둘 다 Primary A 단독 공략으로 시도되었으나 production metric (σ̄_expl)에 **negative side effect** (L-B: 770 catastrophic, Huber: +10σ). Advantage net과 Strategy net의 dependency는 정확히 **unidirectional** (advantage_net → σ_t → strategy_buffer → strategy_net, no feedback) — Strategy_net은 advantage_net의 σ output을 단순 averaging하는 downstream branch. Advantage_net의 학습 dynamics 변경은 strategy_buffer sample을 변경 → strategy_net이 같은 biased σ를 averaging → σ̄도 biased. 'Primary A 단독 공략'은 isolated axis 아니지만, 'decouple'은 가능 옵션 아님 (downstream is downstream by design)."
+
+#### Educational asset #15 (Day 7 신규, (b') design review에서 추출)
+
+"Deep CFR variance reduction은 **unbiasedness 보존**이 critical. CFR convergence theorem은 instantaneous regret estimator가 unbiased일 때만 σ̄ → Nash 보장. **Bias 추가하는 변경**은 시간 평균으로도 회복 안 됨:
+- L-B Schmid 2019 mis-implementation: regret signal cancellation = 100% bias toward 0
+- Huber MSE→robust loss: outlier softening = systematic bias toward uniform σ
+- Variance reduction이 목적이라면 unbiased 보존 필수. Bias 추가하는 'shortcut'은 production metric (σ̄_expl) 폭발 형태로 즉각 reveal됨."
+
+이 자산은 Phase 4-5 HUNL에서 variance reduction (regret normalization, baseline subtraction, robust loss 등) 시도 시 **체크리스트로 활용**: "이 변경이 instantaneous regret estimator의 expectation을 보존하는가?" 검증 필수.
 
 #### Hypothesis tree status (Day 6 종료)
 
