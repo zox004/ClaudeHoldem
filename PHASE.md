@@ -5,8 +5,9 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Phase 3 metric 재정의 v5 (2026-04-25 야간)**: Day 4-7 evidence (3-axis architectural limit on Primary A) 기반으로 Exit #4 v5 채택. **GREEN gate = σ̄_expl < 10 mbb/g 단독**. Primary A는 진단용 metric으로 강등 (architectural limit 인정). Primary B는 보조. **Day 8 axis = Cap+epoch 결합** (4×128 + advantage_epochs=10), σ̄_expl 가산 효과 검증.
-**Day 5-7 history**: σ_seed=0.010, L-B quarantine, Huber transient/over-reg, (e) marginal, 가설 (c)/(d)/(f) sealed reject, (b') framing rejected, Strategy-side Cap 4.5σ on σ̄_expl robust.
+**Phase**: 3 진행 중 — **Day 8 Cap+epoch saturation (2026-04-26 새벽)**: σ̄_expl 141.6 (4.31σ vs 5-seed mean), **Day 4 Cap-alone 139.4와 effectively same floor**. (e) 추가 효과 없음 — Cap saturation 발견. Primary B 4.15σ stack-up (strategy quality는 가산), Primary A 0.05σ (architectural floor 재확증). σ̄_expl monotone decreasing 보장 깨짐 (T=250 139 → T=500 141.6, strategy_net averaging estimator noise floor — 자산 #17 후보). Day 9 axis = T/K/Cap further 중 결정.
+**Phase 3 metric v5 (2026-04-25)**: GREEN gate = σ̄_expl < 10 mbb/g 단독. Primary A diagnostic-only.
+**Day 5-7 history**: σ_seed=0.010, L-B quarantine, Huber transient/over-reg, (e) marginal, Strategy-side Cap 4.5σ on σ̄_expl robust.
 **핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
 **테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
 **Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
@@ -33,6 +34,101 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 8 — Cap+epoch saturation + Deep CFR σ̄_expl non-monotone 발견 (2026-04-26 새벽)
+
+> 1 commit (`48aab2d` Exit #4 v5 metric 재정의). Run 171.0min, FINAL T=500 σ̄_expl=141.6 ≈ Day 4 Cap-alone 139.4.
+
+#### 설계 (멘토 승인, axis combination)
+
+CLI override: `deep_cfr.hidden_dim=128 deep_cfr.num_hidden_layers=3 deep_cfr.advantage_epochs=10 deep_cfr.strategy_epochs=4`. Cap (Day 4) + epoch (Day 7) 결합. 양쪽 net 모두 4×128 (코드상 hidden_dim/num_hidden_layers shared).
+
+#### 실측 결과 (Leduc T=500 K=100 seed=42, 171.0min)
+
+| T | prim_A | prim_B | σ̄_expl | dt_deep |
+|---|---|---|---|---|
+| 50 | 0.2694 | 0.8708 | 219.5 | 192s |
+| 100 | 0.2749 | 0.8567 | **171.0** | 610s |
+| 250 | 0.2630 | 0.8079 | **139.0** ← min | 2984s |
+| **500** | **0.2481** | **0.8513** | **141.6** ← +2.6 from min | 6377s |
+
+per-iter time: Day 4 (Cap only) 93min × Day 7 1.6× factor ≈ 150min 예상, 실측 171min (14% over, network forward time는 capacity와 epoch 둘 다 반영).
+
+#### Effect-size 판정 (Day 5 σ_seed reference)
+
+| Metric @ T=500 | Day 8 | 5-seed mean | σ_seed | Effect Size | 판정 |
+|---|---|---|---|---|---|
+| Primary A | 0.2481 | 0.2476 | 0.0100 | **+0.05σ** | architectural floor 재확증 |
+| Primary B | 0.8513 | 0.7973 | 0.0128 | **+4.15σ** | **strongly significant (Cap+epoch stack-up)** |
+| σ̄_expl | 141.6 | 181.6 | 9.27 | **-4.31σ** | strongly significant (Cap-alone와 같은 수준) |
+
+#### 핵심 발견 #1 — Cap+(e) σ̄_expl saturation
+
+| Run | σ̄_expl | (e) 추가 효과 |
+|---|---|---|
+| Day 3 (3×64 baseline) | 181.6 | — |
+| Day 4 (4×128) | 139.4 | — |
+| Day 7 (3×64+eps10) | 177.4 | (e) 단독 -2 (noise) |
+| Day 8 (4×128+eps10) | **141.6** | **+2.2 worse than Cap-alone!** |
+
+→ **Cap+(e) ≈ Cap-alone**. (e)는 (Cap) 위에 추가 σ̄_expl 효과 없음 — 두 axis가 orthogonal 아님, 같은 underlying limit (capacity? T? variance?)에 bottleneck. **σ̄_expl 140 floor가 단일 + 결합 axes로 풀리지 않음**.
+
+#### 핵심 발견 #2 — Deep CFR σ̄_expl non-monotone (자가 audit #11)
+
+Day 8 trajectory: T=250 139.0 → T=500 141.6 (+2.6 mbb/g 증가).
+
+**Tabular CFR**: σ̄_t = exact average over t iters → monotone decreasing 보장 (CFR theorem).
+**Deep CFR**: σ̄_t = strategy_net의 prediction (reservoir buffer + linear weighting trained) → **estimator variance present**, late-iter sample addition이 noise floor에서 fluctuation.
+
+→ Day 4 trajectory도 retrospectively 확인: 162.4 (T=500) was actually 250→500 -29 monotone, but Day 8은 250→500 +2.6 (slightly up). 단일 seed 변동도 가능. Multi-seed 검증으로 noise vs systematic 구분 가능.
+
+**Educational asset #17 (Day 8 신규)**:
+"Deep CFR의 σ̄_expl는 monotone decreasing 보장 안 됨 (strategy_net averaging estimator의 noise floor 존재). Tabular CFR과 다름 — 평가 시 다중 checkpoint 평균 또는 multi-seed 사용 권장. T=500에서 fluctuate하면 T↑이 단순 saturation일 수 있음."
+
+#### 핵심 발견 #3 — Primary B Cap+(e) stack-up
+
+| Run | Primary B | Effect Size vs 5-seed mean (0.7973) |
+|---|---|---|
+| Day 3 | 0.7883 | -0.7σ |
+| Day 4 | 0.8232 | +2.0σ |
+| Day 7 | 0.8257 | +2.2σ |
+| **Day 8** | **0.8513** | **+4.15σ** |
+
+Cap effect (+0.026) + (e) effect (+0.028) = sum +0.054 (matches Day 8 Δ +0.054). **Strategy net quality는 두 axes 가산** — Primary B (diagnostic only) sustains improvement direction.
+
+다만 Primary B는 Exit #4 v5에서 GREEN gate 아닌 diagnostic. σ̄_expl이 critical, 그 axis는 saturated.
+
+#### Hypothesis tree status (Day 8 종료)
+
+| 가설 | 상태 |
+|---|---|
+| (a) network capacity | Day 4 multi-seed로 Primary A noise within, σ̄_expl는 4.5σ; **Day 8로 Cap saturation 발견** |
+| (b) target variance | L-B failed, Huber rejected, 단독 공략 부적합 |
+| (b') decouple | rejected (unidirectional dependency) |
+| (c) self-corr noise | sealed reject |
+| (d) metric mismatch | rejected |
+| (e) Brown 2019 defaults | Day 7 borderline single-axis, **Day 8 Cap+(e) saturation으로 추가 효과 없음** |
+| (f) buffer linear weighting | rejected |
+
+**Day 8까지 가설 (a)/(e) Cap+(e) saturation으로 σ̄_expl 140 floor 도달**. 추가 axes (T / K / Cap further) 필요.
+
+#### Day 9 axis 옵션 (멘토 결정 영역)
+
+| 옵션 | Cost | 핵심 가설 |
+|---|---|---|
+| **T axis** (T=500 → T=1000/2000) | 5h+ | "T=500 unconverged 가능, Brown 2019 T=10^5 사용. σ̄_expl floor가 T-dependent인지 검증" |
+| **K axis** (K=100 → 300/1000) | 2-3× wall-clock = 5-8h | Brown 2019 default A1=1000. 분산 감소 직접 |
+| **Cap further** (5×256 or 6×256) | 3-4h | "Cap saturation이 4×128 specific인지, 더 큰 capacity로 풀리는지" |
+| **Multi-axis stretch** | 6-12h+ | T+K+Cap 동시 |
+| **GREEN 약화** (< 50? < 30?) | 0 | metric 재정의 두 번째 — Phase 3 timeline reality |
+
+**클코 1순위**: **T axis (T=2000)** — Day 8 trajectory non-monotone 발견은 noise floor 가설 또는 unconverged 가설 둘 다 가능. T↑가 결정적 distinguish. 6h cost는 multi-axis 결합 (K↑, Cap↑) 보다 cheap, single experiment으로 큰 정보.
+
+#### Day 8 자가 audit (11번째 클코)
+
+σ̄_expl monotone 가정 잘못 적용. Tabular CFR 가정을 Deep CFR에 무비판 적용한 PHASE.md 표현 (Day 2/Day 3 entry의 "σ̄ exploitability monotone 수렴" — Tabular reference 근거)과 Deep CFR 실측 (Day 8 T=250 139 → T=500 141.6) 사이 gap 식별. Phase 4-5 HUNL에서도 같은 estimator noise floor 예상 — multi-seed 평가 patterns 채택 필요.
+
+자율 audit 누계: 클코 11건 (멘토 5건). Phase 3 가설 트리 거의 종결, σ̄_expl axis 탐색 단계.
 
 ### Phase 3 Day 7 — (e) advantage_epochs 4→10 borderline + 3-axis convergence 패턴 (2026-04-25 늦은 저녁)
 
