@@ -84,6 +84,8 @@ class DeepCFR:
         advantage_target_normalize: bool = False,
         advantage_baseline: str = "none",
         baseline_alpha: float = 0.1,
+        advantage_loss: str = "mse",
+        huber_delta: float = 1.0,
     ) -> None:
         self.game = game
         self.n_actions = n_actions
@@ -193,6 +195,27 @@ class DeepCFR:
         # values default to zero on first visit, which makes the correction
         # a no-op until at least one observation lands in the (I, a) cell.
         self._baselines: dict[int, dict[str, np.ndarray]] = {0: {}, 1: {}}
+
+        # Phase 3 Day 6 #2b-1 — Huber loss as a robust alternative to MSE on
+        # the signed-regret target. Hypothesis (b) "advantage target variance
+        # bottlenecks Primary A" was approached via L-B (Schmid 2019, Day 5
+        # Step 5) which failed for architectural reasons (see _baselines
+        # docstring above). Huber is a 5-line change that keeps the target
+        # statistics untouched and only swaps the loss form: outliers in the
+        # signed regret distribution contribute linearly instead of
+        # quadratically, reducing their dominance on the gradient. The
+        # threshold ``huber_delta`` is fixed (option A from mentor brainstorm
+        # — running EMA was deferred to avoid the D-2 scale-shift trap).
+        if advantage_loss not in ("mse", "huber"):
+            raise ValueError(
+                f"advantage_loss must be 'mse' or 'huber', got {advantage_loss!r}"
+            )
+        if huber_delta <= 0.0:
+            raise ValueError(
+                f"huber_delta must be > 0, got {huber_delta}"
+            )
+        self.advantage_loss = advantage_loss
+        self.huber_delta = float(huber_delta)
 
         self.iteration: int = 0
 
@@ -416,18 +439,28 @@ class DeepCFR:
                     y_scaled = y_b
 
                 pred = net(x_b)
-                # Per-sample weighted MSE (Linear CFR loss weighting).
+                # Per-sample weighted loss (Linear CFR loss weighting).
                 # Normalized weighted mean: Σ w_i · s_i / Σ w_i (not / n),
                 # so T-dependent weight scale does not inflate effective
                 # gradient magnitude as iteration grows (Phase 3 Day 2b
                 # hypothesis A fix — iter_weight=t polynomial growth would
                 # otherwise bias optimisation toward recent samples).
-                per_sample = ((pred - y_scaled) ** 2).mean(dim=1)
+                if self.advantage_loss == "huber":
+                    # Day 6 #2b-1: outlier-robust loss form. Quadratic
+                    # below |residual| < δ, linear above. Same minimum as
+                    # MSE in the absence of outliers.
+                    per_sample = torch.nn.functional.huber_loss(
+                        pred, y_scaled,
+                        reduction="none",
+                        delta=self.huber_delta,
+                    ).mean(dim=1)
+                else:
+                    per_sample = ((pred - y_scaled) ** 2).mean(dim=1)
                 w_sum = w_b.sum().clamp(min=1e-8)
                 loss = (per_sample * w_b).sum() / w_sum
 
                 optimizer.zero_grad()
-                loss.backward()
+                loss.backward()  # type: ignore[no-untyped-call]
                 gn = float(
                     nn.utils.clip_grad_norm_(net.parameters(), _GRAD_CLIP_NORM)
                 )

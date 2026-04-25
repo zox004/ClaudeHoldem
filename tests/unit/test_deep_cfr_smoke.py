@@ -484,3 +484,113 @@ class TestDeepCFRBaselineLB:
         assert max(diffs) > 1e-6, (
             f"L-B did not change targets vs none-baseline: max Δ={max(diffs)}"
         )
+
+
+# =============================================================================
+# Day 6 #2b-1: Huber loss as outlier-robust alternative to MSE
+# =============================================================================
+class TestDeepCFRHuberLoss:
+    """Phase 3 Day 6 #2b-1: advantage_loss='huber' opt-in path."""
+
+    def _trainer(
+        self,
+        loss: str = "mse",
+        delta: float = 1.0,
+    ) -> DeepCFR:
+        return DeepCFR(
+            game=KuhnPoker(),
+            n_actions=2,
+            encoding_dim=6,
+            traversals_per_iter=10,
+            batch_size=8,
+            advantage_epochs=1,
+            strategy_epochs=1,
+            seed=42,
+            advantage_loss=loss,
+            huber_delta=delta,
+        )
+
+    def test_default_loss_is_mse(self) -> None:
+        trainer = _make_kuhn_trainer()
+        assert trainer.advantage_loss == "mse"
+
+    def test_invalid_loss_raises(self) -> None:
+        with pytest.raises(ValueError, match="advantage_loss"):
+            DeepCFR(
+                game=KuhnPoker(), n_actions=2, encoding_dim=6,
+                advantage_loss="bogus",
+            )
+
+    def test_invalid_huber_delta_raises(self) -> None:
+        with pytest.raises(ValueError, match="huber_delta"):
+            DeepCFR(
+                game=KuhnPoker(), n_actions=2, encoding_dim=6,
+                advantage_loss="huber", huber_delta=-0.1,
+            )
+        with pytest.raises(ValueError, match="huber_delta"):
+            DeepCFR(
+                game=KuhnPoker(), n_actions=2, encoding_dim=6,
+                advantage_loss="huber", huber_delta=0.0,
+            )
+
+    def test_huber_runs_without_error(self) -> None:
+        trainer = self._trainer("huber", 1.0)
+        trainer.train(2)
+        assert len(trainer.train_history) == 6
+
+    def test_huber_target_stats_match_mse(self) -> None:
+        """Huber only changes the loss form; the regret targets fed into
+        the buffer are identical to the MSE path. So target_abs_mean and
+        target_abs_std on iter-1 advantage events must match exactly
+        (same seed, same traversal-time RNG state, identical buffers)."""
+        a = self._trainer("mse")
+        a.train(1)
+        b = self._trainer("huber", 1.0)
+        b.train(1)
+        a_adv = [e for e in a.train_history if e["net"] == "advantage"]
+        b_adv = [e for e in b.train_history if e["net"] == "advantage"]
+        for ea, eb in zip(a_adv, b_adv):
+            assert abs(
+                float(ea["target_abs_mean"]) - float(eb["target_abs_mean"])
+            ) < 1e-9
+            assert abs(
+                float(ea["target_abs_std"]) - float(eb["target_abs_std"])
+            ) < 1e-9
+
+    def test_huber_loss_value_differs_from_mse(self) -> None:
+        """Non-trivial regret targets → Huber and MSE produce different
+        loss numerics (and gradients), even on iter 1. Constructor must
+        directly precede train so global RNG state is identical."""
+        a = self._trainer("mse")
+        a.train(1)
+        b = self._trainer("huber", 0.5)
+        b.train(1)
+        a_adv = [e for e in a.train_history if e["net"] == "advantage"]
+        b_adv = [e for e in b.train_history if e["net"] == "advantage"]
+        # At least one player's loss_final must differ.
+        diffs = [
+            abs(float(ea["loss_final"]) - float(eb["loss_final"]))
+            for ea, eb in zip(a_adv, b_adv)
+        ]
+        assert max(diffs) > 1e-6, (
+            f"Huber and MSE produced identical losses: max Δ={max(diffs)}"
+        )
+
+    def test_huber_seed_reproducibility(self) -> None:
+        a = self._trainer("huber", 1.0)
+        a.train(2)
+        b = self._trainer("huber", 1.0)
+        b.train(2)
+        for ea, eb in zip(a.train_history, b.train_history):
+            assert abs(
+                float(ea["loss_final"]) - float(eb["loss_final"])
+            ) < 1e-6
+
+    def test_huber_finite_after_training(self) -> None:
+        trainer = self._trainer("huber", 1.0)
+        trainer.train(2)
+        for p_net in trainer.advantage_nets.values():
+            for p in p_net.parameters():
+                assert torch.isfinite(p).all()
+        for p in trainer.strategy_net.parameters():
+            assert torch.isfinite(p).all()

@@ -217,6 +217,8 @@ def _run_training(cfg: DictConfig) -> dict[str, object]:
         num_hidden_layers=int(cfg.deep_cfr.get("num_hidden_layers", 2)),
         advantage_baseline=str(cfg.deep_cfr.get("advantage_baseline", "none")),
         baseline_alpha=float(cfg.deep_cfr.get("baseline_alpha", 0.1)),
+        advantage_loss=str(cfg.deep_cfr.get("advantage_loss", "mse")),
+        huber_delta=float(cfg.deep_cfr.get("huber_delta", 1.0)),
     )
     vanilla = VanillaCFR(game=game, n_actions=3)
     cfp = CFRPlus(game=game, n_actions=3)
