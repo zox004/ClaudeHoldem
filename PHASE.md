@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 4 Cap 4×128 단일-seed 기각 (2026-04-25)**: Fair NAE 0.258 (3-point scan 0.266→0.268→0.258). seed=42 단일 측정에서 Primary A가 capacity-non-monotonic. **σ_seed 미측정 상태에서 잠정 결론 — Day 4 entry 자가 retraction 적용 (2026-04-25 후속 commit)**. Strategy net은 capacity 수혜 명확 (σ̄_expl -14%, Primary B +0.023, 3-point monotone).
-**Phase 3 metric**: Fair NAE framework (v4) 확립. Pearson correlation 기반 (Spearman 아님 — 멘토 4번째 오류 정정). Kuhn 0.821 vs Leduc Day 4 0.258.
-**테스트**: **unit 360 + integration fast 10 GREEN**
-**Next 세션 (Day 5, 9-step plan)**: 1) PHASE.md retraction commit, 2) H Tier 1 logging 추가 (advantage/strategy loss curve), 3) I (random-init Primary A floor), 4) D' (adaptive 3→5 seed σ + d1 Vanilla linear-weighted Pearson), 5) A (3×64 + L-B Schmid baseline), 6) Δ_LB/σ_seed effect-size 분기.
+**Phase**: 3 진행 중 — **Day 5 Steps 1-5 완료 (2026-04-25 오후)**: 6 commits, **377 unit GREEN**.
+**핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
+**테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
+**Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -32,6 +32,167 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Day 5 — σ_seed 정량 + L-B 실패 + 가설 트리 정정 (2026-04-25 오후)
+
+> 6 commits: `623cacd` (Day 4 retraction), `ef4ad41` (H Tier 1 logging), `298971e` (I random floor), `fdf5d49` (d1 Vanilla linear-weighted), `6df43e2` (L-B impl), `a30238b` (L-B quarantine).
+>
+> **9-step plan**: H 가설 (logging 추가) + I (random floor calibration) + D' (σ_seed adaptive 3→5 + d1 metric mismatch + game value sanity) + A (L-B Schmid baseline). **Step 5 A 즉시 실패 발견**, axis 재선택 단계로 이동.
+
+#### Step 1: Day 4 strong claim 자가 retraction
+
+4 strong 표현 약화:
+- "Cap axis EXHAUSTED" → "non-monotonic under seed=42 (single-seed)"
+- "결정적으로 확증" → "single-seed 일관성, multi-seed 검증 필요"
+- "Kuhn→Leduc capacity transfer 가정 반증" → "reduced (single-seed evidence)"
+- "Cap axis 종결" → "잠정 종결, σ_seed 후 재평가"
+
+**근거**: Phase 3 Deep CFR multi-seed 0건. Δ Cap = ±0.01 결론이 noise within 가능성 배제 못함 (멘토 가설 #4 정당).
+
+**비대상**: 교육 자산 #4 (capacity decouples, Strategy-side robust), #9 (R1 mixed +67% small-n artifact 재분류) — 둘 다 multi-checkpoint reproducible로 single-seed에서도 robust.
+
+#### Step 2: H Tier 1 logging — `train_history` 추가
+
+DeepCFR에 instance attribute `train_history: list[dict]` 추가. 매 advantage/strategy train call마다 1 event:
+- `iter, net, player (advantage only), n_samples`
+- `loss_per_epoch (list), loss_initial, loss_final` — plateau 판정
+- `target_abs_mean, target_abs_std` — D-2 가설 잔여 확인
+- `grad_norm_max` (clip 전 norm) — training stability
+
+Library wandb-free. Harness (Kuhn + Leduc) `_train_until` 안에서 새 events를 `train/{tag}_*` namespace로 forward (per iter aggregate, monotone step 축).
+
+7 신규 unit tests (TestDeepCFRTrainHistory): 빈 시작, event 개수/순서, 스키마 검증, 길이 매칭, finite/non-negative, simplex sanity (Kuhn `target_abs_mean=0.5` 정확). 367 unit GREEN.
+
+#### Step 3: I — random AdvantageNet Primary A floor
+
+5 init seeds {42, 43, 44, 45, 46}, untrained net (no `train()`), Vanilla+CFR+ T=500 deterministic reference.
+
+| Game | random Primary A (n=5, 1σ) | Day 4 trained Δ | Effect Size |
+|---|---|---|---|
+| Kuhn | -0.0381 ± 0.0841 | (Day 2b-A 0.81) +0.85 | ~10σ |
+| Leduc | -0.0497 ± 0.0813 | (Day 4 0.247) **+0.30** | **3.65σ** |
+
+→ **가설 (c) self-correlation noise floor empirical seal reject**: trained network이 random보다 3.65σ 위. 0.247 floor는 진짜 approximation gap.
+→ σ_init = 0.08은 trained σ_seed의 **이론적 상한** (학습이 0 정보 흡수 시).
+
+`experiments/phase3_day5_random_primary_a.py` reproducible (3초 run, ruff/mypy clean).
+
+#### Step 4: D' — σ_seed adaptive (3→5) + d1 + game value sanity
+
+##### d1 — Vanilla linear-weighted vs uniform Pearson
+
+VanillaCFR에 `track_linear_weighted=False` opt-in (default off, 코드 wrap 영향 0). InfosetData에 `cumulative_regret_linear` shadow array. Strategy 결정은 `cumulative_regret` (uniform)만 사용 → 수렴성 보존.
+
+| Game | Pearson(R_uniform, R_linear) | n_pairs | Cutoff 판정 |
+|---|---|---|---|
+| Kuhn | **0.9997** | 24 | NEGLIGIBLE |
+| Leduc | **0.9565** | 672 | NEGLIGIBLE (cutoff 0.95 위) |
+
+→ **가설 (d) metric mismatch 기각**: linear weighting 자체가 Day 4 floor 0.247 중 ≤ 0.02 흡수.
+→ **가설 (f) buffer linear CFR weighting artifact 기각** (= (d) 같은 source).
+
+**Game value sanity** (free byproduct): Leduc Vanilla σ̄ exploitability @ T=500 = 0.0303 chips = **15.15 mbb/g**, PHASE.md Day 4 기록 `van=15.137 mbb/g`와 **3 sig fig 일치** ✓ — linear shadow가 σ̄ 미교란 확인.
+
+##### σ_seed adaptive (n=3 → n=5 확장)
+
+3×64 baseline에 seed={43, 44, 45, 46} 추가 run (각 ~70min, 동시 실행 페어). 5-seed Primary A {42, 43, 44, 45, 46} = {0.2549, 0.2381, 0.2428, 0.2443, 0.2580}.
+
+**σ_seed 시간 의존성** (n=5, 3×64):
+| T | σ̂ Primary A |
+|---|---|
+| 100 | 0.0052 |
+| 250 | 0.0092 |
+| 500 | **0.0100** |
+
+→ σ는 학습 시간 따라 grow (training이 seed-specific local minima로 분기). σ̂/σ_init = 12.5%, 멘토 cutoff 0.008-0.020 "통상" band 정확. 95% CI σ_true ∈ [0.006, 0.029] (chi-square df=4).
+
+**Day 4 Cap Δ multi-seed 판정**:
+
+| Metric | Cap Δ (Day 3 → Day 4) | σ_seed (n=5, T=500) | **Effect Size** | 판정 |
+|---|---|---|---|---|
+| Primary A | -0.008 | 0.010 | **0.8σ** | **NOISE WITHIN** |
+| Primary B | +0.0349 | 0.013 | **2.7σ** | borderline sig |
+| σ̄_expl | -42.2 mbb/g | 9.27 | **4.5σ** | **STRONGLY SIG** |
+
+→ **Day 4 retraction 정량적으로 정당화**: Primary A "Cap exhausted" claim는 single-seed에서 noise 안.
+→ **교육 자산 #4 (capacity decouples) sharper picture**: Strategy-side는 진짜 효과 (σ̄_expl 4.5σ), Advantage-side는 noise band 안. Capacity의 양극화가 multi-seed로 강하게 입증.
+
+##### 자발적 audit (6번째 클코) — 즉시 정정
+
+`num_hidden_layers=3` (Day 4 4×128 setting) 실수로 σ_seed runs 시작 → 즉시 kill + restart `num_hidden_layers=2` (Day 3 baseline 매칭). 30초 loss로 결과 무효화 방지.
+
+#### Step 5: A — L-B (Schmid 2019 tabular baseline) 구현 + **즉시 실패**
+
+##### 구현 (commit `6df43e2`)
+- `DeepCFR.__init__`에 `advantage_baseline ∈ {"none", "tabular_ema"}` + `baseline_alpha=0.1`
+- `_traverse` updating-player branch에 Schmid 2019 Eq. 6 correction:
+  `r̂(I, a) = (v(I, a) - b(I, a)) - (v(I) - b̄(I))`
+- per-traversal EMA update on legal actions
+- Tier 2 logging (baseline_n_keys, baseline_abs_mean, baseline_var) on advantage events
+- 10 신규 tests (TestDeepCFRBaselineLB): 377 unit GREEN
+
+##### Run @ Leduc T=500, K=100, seed=42 — T=50에서 catastrophic regression 발견
+
+| Metric @ T=50 | Day 3 baseline (no L-B) | **L-B run** | 비교 |
+|---|---|---|---|
+| Primary A | (T=50 not measured) | **-0.027** | random floor -0.05 수준 |
+| Primary B | (T=50 not measured) | **0.275** | baseline 0.81 대비 1/3 |
+| σ̄_expl (mbb/g) | ~250 (Day 3 T=100=231) | **770** | **3× 악화** |
+
+**즉시 kill** (T=50 도착 후 5분 내), σ̄_expl 770은 거의 random play 수준 — 무의미.
+
+##### 실패 원인 — 5번째 자발적 audit (이중 architectural error)
+
+**(i) Self-cancellation**: α=0.1 EMA × 100 traversals/iter → b(I, a)가 1 iter 내에 v(I, a)에 수렴. b̄(I) ≈ node_value. r̂ = (v - b) - (v(I) - b̄) → **0**. Network 출력 0 → regret-matching uniform σ → 거의 random play.
+
+**(ii) Wrong node type**: Schmid 2019 baseline은 **non-updating-player branch**의 ε-smoothed sampling noise를 줄임. External sampling Deep CFR에서 **updating-player infoset은 ALL actions 재귀 평가** (no sampling there). 잘못된 위치에 적용 → variance 줄이지 못하고 bias만 추가.
+
+**Quarantine** (commit `a30238b`): 코드 path 보존 (default OFF), 코멘트로 broken 명시. Production 영향 0.
+
+##### Educational asset #11 (Day 5 신규)
+
+"Schmid 2019 control variate를 잘못된 node type에 + 너무 빠른 EMA로 적용 시 regret signal 자체 cancel. 변경 검증은 unit test로 부족 — 1-2 iter 작은 trace로는 self-cancellation이 발현 안 함. 알고리즘 변경은 **convergence smoke (T≥50)**가 필수."
+
+##### Educational asset #12 (Day 5 신규)
+
+"Multi-seed (n=5)로 capacity decouples (#4)가 정량적으로 sharpen됨: Strategy-side σ̄_expl Cap effect 4.5σ vs Advantage-side Primary A 0.8σ. Single-seed에서 동일 패턴 visible했으나 effect-size 명확화는 multi-seed 필수. 결론: cap 효과 분석은 항상 σ_seed 비교 동반."
+
+#### Hypothesis tree status (Day 5 종료)
+
+| 가설 | 내용 | 검증 axis | **Day 5 종료 상태** |
+|---|---|---|---|
+| (a) | Network capacity limit | Day 4 Cap | **noise within (0.8σ)** — single-seed 결론 무효, multi-seed로 대체 |
+| (b) | Advantage target variance | Day 5 A (L-B) | **L-B 구현 실패, 다른 axis 필요** (#2b-1 Huber 후보) |
+| (c) | Self-corr noise | Step 3 random floor | **sealed reject** (3.65σ above random) |
+| (d) | Metric definition mismatch | Step 4 d1 | **rejected** (Pearson 0.9565) |
+| (e) | Brown 2019 defaults (epochs/size) | future | pending — Day 6 후보 |
+| (f) | Buffer linear CFR weighting | Step 4 d1 | **rejected** (= (d)) |
+
+(b)/(e) 우선순위 강화. (a)는 multi-seed 검증 또는 더 큰 capacity range 실험 필요.
+
+#### Day 6 axis 재선택 옵션 (Day 5 결정 미확정)
+
+| 옵션 | Cost | 핵심 |
+|---|---|---|
+| **#2b-1 Huber loss** | ~5줄 + 70min run | (b) target form sensitivity, MSE→Huber outlier-robust |
+| **(e) advantage_epochs 4 → 10** | ~3줄 + 70min run | training budget 부족 가설 |
+| L-B fix-it (F1 iter-frozen) | ~30줄 + tests + run | architectural risk, 결과 불확실 |
+| L-B fix-it (F2 non-updating branch) | ~80줄 + 깊은 재설계 | Schmid 2019 정확 구현, 큰 작업 |
+| Multi-seed Cap 재검증 | ~12h | 가설 (a) 정밀 검증, 가장 비쌈 |
+
+**클코 추천**: #2b-1 Huber loss. 변경 최소 (5줄), 가설 (b) variance reduction axis 다른 방법으로 즉시 시도. 실패 시 (e)로 이동. 결정은 멘토와 합의 후.
+
+#### Day 5 자발적 audit 누계 (클코 7건)
+
+1. wandb.mode=offline 임의 override (Day 4)
+2. Day 3b yaml `[50]` checkpoint missing (Day 4)
+3. 0.36 ceiling 재해석 → fair-data ceiling (Day 3c)
+4. D-2 EMA root cause 추정 (Day 3c)
+5. Linear CFR weighting source observation (Day 4 마지막)
+6. σ_seed run에 num_hidden_layers=3 실수 (Day 5 Step 4)
+7. **L-B failure 즉시 진단 + double architectural error 식별 (Day 5 Step 5)** ← 가장 큰 발견
+
+멘토 누계 4건 + 클코 누계 7건. Phase 3 자가 발견 패턴 강화.
 
 ### Phase 3 Day 4 — Cap 4×128 기각 + Cap axis abandon (2026-04-25)
 
