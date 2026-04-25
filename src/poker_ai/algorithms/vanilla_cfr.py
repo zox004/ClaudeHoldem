@@ -53,7 +53,7 @@ Interface
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -79,6 +79,18 @@ class InfosetData:
     cumulative_regret: np.ndarray
     cumulative_strategy: np.ndarray
     legal_mask: np.ndarray
+    # Phase 3 Day 5 Step 4 (d1): linear-weighted cumulative regret —
+    #   R_linear(I, a) = Σ_t t · r^t(I, a)
+    # Tracked only when VanillaCFR(track_linear_weighted=True) is set;
+    # default zeros and untouched otherwise. Used to compare against the
+    # uniform-weighted cumulative regret R(I, a) = Σ_t r^t(I, a) so the
+    # Day 4 hypothesis (d) "buffer linear-CFR weighting biases the Pearson
+    # reference" can be quantified via Pearson(R_uniform, R_linear) without
+    # disturbing Vanilla CFR's actual regret-matching behaviour, which still
+    # reads ``cumulative_regret``.
+    cumulative_regret_linear: np.ndarray = field(
+        default_factory=lambda: np.zeros(0)
+    )
 
 
 class VanillaCFR:
@@ -87,11 +99,20 @@ class VanillaCFR:
     One ``train`` iteration = one alternating cycle (both players updated once).
     """
 
-    def __init__(self, game: GameProtocol, n_actions: int = 2) -> None:
+    def __init__(
+        self,
+        game: GameProtocol,
+        n_actions: int = 2,
+        track_linear_weighted: bool = False,
+    ) -> None:
         self.game = game
         self.n_actions = n_actions
         self.infosets: dict[str, InfosetData] = {}
         self.iteration: int = 0
+        # Phase 3 Day 5 Step 4 (d1): opt-in linear-weighted regret tracking.
+        # Default off — preserves existing behaviour and avoids per-infoset
+        # memory overhead in production runs.
+        self.track_linear_weighted: bool = track_linear_weighted
 
     # ------------------------------------------------------------------ public
 
@@ -221,6 +242,11 @@ class VanillaCFR:
                 cumulative_regret=np.zeros(self.n_actions),
                 cumulative_strategy=np.zeros(self.n_actions),
                 legal_mask=state.legal_action_mask(),
+                cumulative_regret_linear=(
+                    np.zeros(self.n_actions)
+                    if self.track_linear_weighted
+                    else np.zeros(0)
+                ),
             )
 
         # --- Current strategy σ(I) via regret matching (legal-masked).
@@ -279,6 +305,13 @@ class VanillaCFR:
         to clip at storage time instead.
         """
         self.infosets[key].cumulative_regret += instantaneous_regret
+        # Day 5 Step 4 (d1): linear-weighted shadow accumulation. iter_weight
+        # = self.iteration + 1 so the first iteration contributes weight 1
+        # (matches Deep CFR's iter_weight convention in deep_cfr.py:228).
+        # Strategy computation never reads this field — pure measurement.
+        if self.track_linear_weighted:
+            t = float(self.iteration + 1)
+            self.infosets[key].cumulative_regret_linear += t * instantaneous_regret
 
     def _update_strategy(
         self, key: str, reach_i: float, strategy: np.ndarray
