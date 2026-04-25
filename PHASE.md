@@ -5,8 +5,8 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 7 (e) advantage_epochs 4→10 marginal (2026-04-25 늦은 저녁)**: Primary A +1.45σ borderline, Primary B +2.22σ significant, σ̄_expl -0.45σ noise. 3개 다른 axes (Cap / Huber / epochs ↑) 모두 Primary A를 **0.25-0.27 floor 너머로 못 움직임** → **architectural limit 강력 증거**. Phase 3 metric 재정의 mentor 결정 영역 진입.
-**Day 5/6 history**: σ_seed=0.010, L-B quarantine, Huber transient/over-reg, 가설 (c)/(d)/(f) sealed reject, (b') framing rejected (unidirectional dependency).
+**Phase**: 3 진행 중 — **Phase 3 metric 재정의 v5 (2026-04-25 야간)**: Day 4-7 evidence (3-axis architectural limit on Primary A) 기반으로 Exit #4 v5 채택. **GREEN gate = σ̄_expl < 10 mbb/g 단독**. Primary A는 진단용 metric으로 강등 (architectural limit 인정). Primary B는 보조. **Day 8 axis = Cap+epoch 결합** (4×128 + advantage_epochs=10), σ̄_expl 가산 효과 검증.
+**Day 5-7 history**: σ_seed=0.010, L-B quarantine, Huber transient/over-reg, (e) marginal, 가설 (c)/(d)/(f) sealed reject, (b') framing rejected, Strategy-side Cap 4.5σ on σ̄_expl robust.
 **핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
 **테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
 **Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
@@ -121,6 +121,49 @@ Day 4-7 collective evidence가 강해서 metric 재정의는 evidence-based just
 **3-axis convergence 패턴 정식 등록**: 단일 axis (Cap, Huber, epochs)으로 Primary A 못 넘는 evidence 4 sessions accumulated. Day 4 single-seed retraction 시점에선 1 axis 결과만 있었음. Day 7에 3 axes confirmed → architectural limit 가설이 **잠정** → **strong evidence**로 promotion 가능. 멘토 우려 (Primary A 0.25 floor architectural)가 정량적으로 sustained.
 
 자율 audit 누계: 클코 10건 (멘토 5건). Phase 3 가설 트리 거의 종결.
+
+#### Exit #4 v5 — Phase 3 metric 재정의 (Day 7 결과 후, 멘토 결정)
+
+Day 4-7 evidence (3-axis Primary A architectural limit) 기반 채택. mentor 4-option pool 중 **C+D 결합**:
+
+```
+Exit #4 v5 GREEN (Phase 3 완주 기준):
+  σ̄_expl < 10 mbb/g (Leduc) / < 5 mbb/g (Kuhn)   ← 유일한 GREEN gate
+
+Diagnostic metrics (GREEN gate 아님, 진단용):
+  Primary A   — architectural ceiling 인정, 게임 scale 따라 변동
+  Primary B   — Strategy quality 보조 진단
+  Fair NAE    — diagnostic only
+
+STRETCH (의미 있는 scope 돌파):
+  σ̄_expl < 1 mbb/g (Leduc)
+```
+
+**v4 → v5 변경 근거** (commit history로 보존):
+- Day 4-7 4 sessions × 3 axes (Cap / Huber / epochs ↑) 모두 Primary A를 0.27 못 넘김
+- Day 5 multi-seed (n=5) σ_seed=0.010 confirmed, Δ Cap = 0.8σ (noise within)
+- Day 6/7 transient peak 패턴 재현 → architectural limit 강력 증거
+- σ̄_expl 4.5σ Cap effect (Day 5) — productive axis 입증
+- σ̄_expl는 production metric, user-facing GREEN과 직접 일치
+
+**v4 historical 보존** (line 580-590 of this file):
+- v4 GREEN: NAE_fair > 0.40 + σ̄_expl < 10 + Primary A > 0.20 guardrail
+- v5에서 NAE_fair, Primary A guardrail 제거 — architectural limit으로 이론적 정당화 어려움
+
+**v5 evidence-based 정당화**:
+- Brown 2019 + Pluribus + 모든 포커 AI 논문 표준 = exploitability (= σ̄_expl)
+- Strategy axis가 Cap에서 4.5σ effect → 점진적 GREEN 도달 가능 path
+- Primary A architectural 인정으로 Phase 3 abandon 회피 + Phase 4 transfer 위한 lesson 보존
+
+#### 다음 axis (Day 8) — Cap+epoch 결합 (멘토 승인)
+
+설계: hidden_dim=128, num_hidden_layers=3 (4×128, 양쪽 net 공유), advantage_epochs=10, strategy_epochs=4 (axis isolation 부분 유지). T=500, K=100, seed=42. ETA ~150min (Day 4 93min × Day 7 1.6× factor).
+
+기대:
+- 가산 결합 (Cap -23% × epoch -2%): σ̄_expl ~136 (Δ -46 = 4.9σ strong)
+- 결합 없음: σ̄_expl ~160 (Δ -22 = 2.4σ marginal)
+
+GREEN reality check: σ̄_expl 181 → 10 = **18× 감소** 필요. 단일 결합 한계 ~50-60%. 다단계 multi-axis (T↑, K↑, Cap↑) 결합 또는 GREEN 약화 (< 50?) 별도 논의.
 
 ### Phase 3 Day 6 — Huber loss (#2b-1) REJECTED + transient effect 발견 (2026-04-25 저녁)
 
