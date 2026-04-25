@@ -5,10 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 4 Cap 4×128 기각 (2026-04-25)**: Fair NAE 0.258 (3-point scan 0.266→0.268→0.258). Advantage net의 Primary A가 capacity-invariant함을 6.7× ratio 확장으로 확증. Strategy net은 여전히 Cap 수혜 (σ̄_expl -14%, Primary B +0.023).
-**Phase 3 metric**: Fair NAE framework (v4) 확립. Kuhn 0.821 vs Leduc Day 4 0.258 — network approximation의 게임 scale 민감도 정량화.
+**Phase**: 3 진행 중 — **Day 4 Cap 4×128 단일-seed 기각 (2026-04-25)**: Fair NAE 0.258 (3-point scan 0.266→0.268→0.258). seed=42 단일 측정에서 Primary A가 capacity-non-monotonic. **σ_seed 미측정 상태에서 잠정 결론 — Day 4 entry 자가 retraction 적용 (2026-04-25 후속 commit)**. Strategy net은 capacity 수혜 명확 (σ̄_expl -14%, Primary B +0.023, 3-point monotone).
+**Phase 3 metric**: Fair NAE framework (v4) 확립. Pearson correlation 기반 (Spearman 아님 — 멘토 4번째 오류 정정). Kuhn 0.821 vs Leduc Day 4 0.258.
 **테스트**: **unit 360 + integration fast 10 GREEN**
-**Next 세션**: **L-B (Schmid 2019 tabular baseline) 단독 실험** — Cap abandon, variance-reduction 축으로 전환 (Exit #4 v4 "L 단독" branch).
+**Next 세션 (Day 5, 9-step plan)**: 1) PHASE.md retraction commit, 2) H Tier 1 logging 추가 (advantage/strategy loss curve), 3) I (random-init Primary A floor), 4) D' (adaptive 3→5 seed σ + d1 Vanilla linear-weighted Pearson), 5) A (3×64 + L-B Schmid baseline), 6) Δ_LB/σ_seed effect-size 분기.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -35,7 +35,9 @@
 
 ### Phase 3 Day 4 — Cap 4×128 기각 + Cap axis abandon (2026-04-25)
 
-> 커밋 `ed5f5d5` (yaml) + 본 문서. 3-point capacity scan (Day 3 / 3b / 4)으로 Primary A의 capacity 불변성을 결정적으로 확증. Cap 축 종결, L-B (variance reduction) 축으로 전환.
+> 커밋 `ed5f5d5` (yaml) + 본 문서. 3-point capacity scan (Day 3 / 3b / 4)으로 Primary A의 capacity 불변성을 single-seed에서 일관성 관측. Cap 축 잠정 종결, L-B (variance reduction) 축으로 전환.
+>
+> **자가 retraction (2026-04-25 후속)**: 본 entry의 강한 표현 4개를 Day 5 brainstorm 멘토 합의로 약화. 아래 "자가 retraction 섹션" 참조.
 
 #### 실험 결과 (Leduc T=500, K=100, seed=42, 93.1분)
 
@@ -64,11 +66,11 @@ W&B: https://wandb.ai/zox004/poker-ai-hunl/runs/8uzm45rp (online sync complete)
 - sqrt: 0.40 (-38% 벗어남)
 - log: 0.63 (-61% 벗어남)
 - linear: 0.20 (+24% 벗어남)
-- → **Kuhn→Leduc capacity transfer 가정 반증**. 파라메트릭 fit 없음.
+- → **Kuhn→Leduc capacity transfer 가정 reduced (single-seed evidence)**. 파라메트릭 fit 없음. σ_seed 측정 후 강도 재평가.
 
-#### 판정: Cap axis EXHAUSTED for Primary A
+#### 판정 (잠정): Cap axis non-monotonic for Primary A under seed=42
 
-3-point scan (ratio, Prim A): **(15.6, 0.255) → (55.6, 0.257) → (104.8, 0.247)**. 6.7× capacity 증가 시 ±0.01 noise 수준. Primary A는 **capacity-invariant**.
+3-point scan (ratio, Prim A): **(15.6, 0.255) → (55.6, 0.257) → (104.8, 0.247)**. 6.7× capacity 증가 시 ±0.01 noise 수준. seed=42 단일 측정에서 Primary A는 **capacity-non-monotonic**. **Single-seed 일관성 관측 (multi-seed 검증 필요)** — Day 5 D' 단계에서 σ_seed 정량화 후 결론 강도 재평가.
 
 Day 4 내부 궤적 (monotone decreasing after peak): 0.289 → 0.267 → 0.254 → 0.247. 초기 peak은 undertrained signal, 수렴과 함께 **0.25 floor로 회귀**.
 
@@ -138,6 +140,38 @@ Day 4 실행 중 2번의 자발적 audit:
 2. **Day 3b yaml에 `[50]` checkpoint 포함 기록 없음 자가 발견** — git log로 commit된 yaml은 `[100, 250, 500]`이었음에도 Day 3b log에 T=50 있었음. Live-edit 후 rollback에서 `[50]` 누락 가능성 식별, Day 4는 `[50, 100, 250, 500]`으로 정식 반영.
 
 Phase 3 공통 meta-pattern: 첫 설계의 hidden assumption을 data 또는 audit으로 발견 → iteration.
+
+#### 자가 retraction (2026-04-25 후속, Day 5 brainstorm 합의)
+
+본 Day 4 entry의 strong claim 4개 약화 (commit 본 retraction commit 참조):
+
+| 원 표현 | 약화된 표현 | 근거 |
+|---|---|---|
+| "Cap axis EXHAUSTED for Primary A" | "Cap axis non-monotonic for Primary A under seed=42 (single-seed 3-point scan)" | σ_seed 미측정 — 3 data point가 noise 내일 가능성 |
+| "결정적으로 확증" | "single-seed 일관성 관측, multi-seed 검증 필요" | 통계 파워 부재 (n=1 per condition) |
+| "Kuhn→Leduc capacity transfer 가정 반증" | "reduced (single-seed evidence)" | 동일 |
+| "Cap axis 종결" | "Cap axis 잠정 종결, σ_seed 후 재평가" | Day 5 D' 단계가 검증 |
+
+**retraction 동기**: 멘토 가설 #4 (seed variance) 우려 정당. Phase 3 Deep CFR multi-seed run 0건 — Day 3, 3b, 3c, 4 모두 seed=42. σ_seed 정량화 없이는 Δ Cap = ±0.01 결론이 noise within일 가능성 배제 못함.
+
+**retraction 비대상**:
+- "Capacity decouples (교육 자산 #4) 강한 확증": Strategy-side 3-step monotone gain (σ̄_expl -23%, Prim B +0.035)은 single-seed에서도 명확 → 유지
+- "R1 mixed +67% small-n artifact 재분류 (교육 자산 #9)": 두 다른 capacity에서 reproducible → 유지
+
+**Spearman/Pearson grep 결과**: PHASE.md에 "spearman" 0 hit. 모든 correlation 표기는 Pearson 함의로 일관됨 (Day 2 line ~580 "Pearson scale-invariance" 명시 문서). 멘토 가설 #3 (Spearman floor) 정정은 PHASE.md 외부 (대화 중) 한정 — 본 retraction commit에서 PHASE.md 표기 수정은 없음.
+
+#### Primary A 0.25 floor — 가설 트리 (Day 5 reference)
+
+| 가설 | 내용 | 검증 axis | 상태 |
+|---|---|---|---|
+| (a) | Network capacity limit | Day 4 Cap 4×128 | **negative (잠정, single-seed)** |
+| (b) | Advantage target variance | Day 5 A (L-B Schmid) | pending |
+| (c) | Self-correlation noise floor | Pearson + deterministic Vanilla | **기각 (가설 정정 후)** |
+| (d) | Metric definition mismatch (uniform-cumulative vs linear-weighted) | Day 5 D' d1 (Vanilla linear-weighted Pearson) | pending |
+| (e) | Brown 2019 default insufficiency (epochs/size scaling) | future audit E (advantage_epochs ↑) | pending |
+| (f) | Buffer linear CFR weighting artifact | Day 5 D' d1 (= 가설 d, 같은 source 두 표현) | pending |
+
+(d)와 (f)는 **같은 root cause의 두 표현**: linear CFR weighting (`iter_weight=t`) 자체가 buffer composition을 시간-편향시키고 → network output이 uniform-cumulative Vanilla regret과 다른 representation으로 수렴. Day 5 D' d1 한 측정으로 동시 진단.
 
 ### Phase 3 Day 3c — D-2 FAIL + Fair NAE Framework 확증 (2026-04-24 저녁)
 
