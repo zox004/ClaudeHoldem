@@ -40,11 +40,15 @@ Same seed → same bucket assignments for every hand.
 
 from __future__ import annotations
 
-from typing import Final
+from dataclasses import dataclass
+from enum import IntEnum
+from typing import Any, Final
 
 import numpy as np
 
+from poker_ai.games.hunl import HUNLGame
 from poker_ai.games.hunl_hand_eval import compare_hands
+from poker_ai.games.hunl_state import HUNLAction, HUNLState
 
 # Rank chars in ascending strength: 2..A.
 _RANK_CHARS: Final[tuple[str, ...]] = (
@@ -229,3 +233,162 @@ class HUNLCardAbstractor:
     def score_of_signature(self, sig: str) -> float:
         """Returns the cached E[HS²] for a signature."""
         return self._scores[sig]
+
+
+# =============================================================================
+# AbstractedHUNLState — wraps HUNLState with abstracted infoset_key (M2.2)
+# =============================================================================
+@dataclass(frozen=True, slots=True)
+class AbstractedHUNLState:
+    """Wraps :class:`HUNLState` and overrides ``infoset_key`` with a
+    bucketed-private-card representation.
+
+    Mirrors :class:`AbstractedLeducState` exactly (Phase 4 Step 2
+    pattern). All other StateProtocol members delegate to the
+    underlying state, so the game tree, legality, terminal_utility,
+    and chance distribution are untouched. Only the strategy-key
+    aliasing changes.
+
+    The infoset_key uses an integer bucket index for the acting
+    player's hole cards plus the raw board-card character / round /
+    history representation. The board is left raw at M2 (board-
+    conditioned bucketing is M3 work); for preflop-only sanity that
+    is fine because the board is empty.
+    """
+
+    _raw: HUNLState
+    _abstractor: HUNLCardAbstractor
+
+    @property
+    def is_terminal(self) -> bool:
+        return self._raw.is_terminal
+
+    @property
+    def current_player(self) -> int:
+        return self._raw.current_player
+
+    @property
+    def infoset_key(self) -> str:
+        """Bucket-indexed perfect-recall key.
+
+        Layout: ``"<bucket>|<round_idx>:<board_str>:<history_str>"``
+        where bucket is the acting-player's hole-cards bucket index,
+        round_idx is 0..3, board_str is a card-id-comma-list (raw at
+        M2), and history_str is the flat action+size sequence so far
+        across all rounds.
+
+        At preflop, board_str = "" and the key reduces to bucket +
+        history alone, giving the cleanest preflop infoset count
+        of (n_buckets × |history_prefixes|).
+        """
+        actor = self._raw.current_player
+        hole_offset = actor * 2
+        c0 = self._raw.private_cards[hole_offset]
+        c1 = self._raw.private_cards[hole_offset + 1]
+        bucket = self._abstractor.bucket(c0, c1)
+        # Board representation: empty at preflop, comma-list otherwise.
+        board_str = ",".join(str(c) for c in self._raw.board_cards)
+        # History flat: round-index-prefixed action sequences.
+        hist_parts: list[str] = []
+        for r_idx, (round_acts, round_sizes) in enumerate(
+            zip(self._raw.round_history, self._raw.round_bet_sizes, strict=True)
+        ):
+            for a, sz in zip(round_acts, round_sizes, strict=True):
+                hist_parts.append(f"{int(a)}:{sz}")
+        hist_str = ".".join(hist_parts)
+        return f"{bucket}|{self._raw.current_round}:{board_str}:{hist_str}"
+
+    def legal_actions(self) -> tuple[IntEnum, ...]:
+        return self._raw.legal_actions()
+
+    def legal_action_mask(self) -> np.ndarray:
+        return self._raw.legal_action_mask()
+
+    def legal_bet_sizes(self) -> tuple[int, ...]:
+        return self._raw.legal_bet_sizes()
+
+    def next_state(
+        self, action: HUNLAction, bet_size: int = 0
+    ) -> AbstractedHUNLState:
+        """Applies the abstracted action.
+
+        **M2 action abstraction**: when ``action == HUNLAction.BET`` and
+        ``bet_size == 0`` (the default — algorithms like MCCFR don't
+        know bet sizes), substitute a 1×pot-size raise capped at the
+        legal max. This collapses the continuous bet space onto a
+        single discrete BET action so MCCFR / Vanilla CFR can run on
+        the wrapper without modification. M3 will widen this to the
+        full {0.5p, 1p, 2p, all-in} 4-size set per the design spec.
+        """
+        if action == HUNLAction.BET and bet_size == 0:
+            # Auto-pick: 1× pot, clamped to legal range.
+            sizes = self._raw.legal_bet_sizes()
+            if not sizes:
+                raise ValueError(
+                    "BET action selected but legal_bet_sizes is empty"
+                )
+            target = self._raw.pot   # 1× pot total
+            # Clamp into [min, max].
+            chosen = max(sizes[0], min(sizes[-1], target))
+            bet_size = chosen
+        return AbstractedHUNLState(
+            _raw=self._raw.next_state(action, bet_size=bet_size),
+            _abstractor=self._abstractor,
+        )
+
+    def terminal_utility(self) -> float:
+        return self._raw.terminal_utility()
+
+
+# =============================================================================
+# AbstractedHUNLGame — GameProtocol-compatible wrapper (M2.3)
+# =============================================================================
+class AbstractedHUNLGame:
+    """:class:`GameProtocol`-compatible HUNL with E[HS²] preflop
+    bucketing.
+
+    Delegates ``all_deals``, ``sample_deal``, ``state_from_deal``,
+    ``terminal_utility``, and ``encode`` to a wrapped :class:`HUNLGame`.
+    Only state's ``infoset_key`` differs from the raw game (via the
+    :class:`AbstractedHUNLState` wrapper).
+
+    Mirrors :class:`AbstractedLeducPoker` exactly (Phase 4 Step 2
+    pattern). MCCFR / Vanilla CFR / Deep CFR algorithms that key
+    strategy by ``state.infoset_key`` automatically share strategy
+    across hands sharing a bucket, exactly the lossy abstraction
+    Pluribus uses.
+    """
+
+    NUM_ACTIONS: int = HUNLGame.NUM_ACTIONS
+    ENCODING_DIM: int = HUNLGame.ENCODING_DIM
+
+    def __init__(
+        self,
+        n_buckets: int = 50,
+        n_trials: int = 10_000,
+        seed: int = 42,
+    ) -> None:
+        self.abstractor = HUNLCardAbstractor(
+            n_buckets=n_buckets, n_trials=n_trials, seed=seed
+        )
+
+    def all_deals(self) -> tuple[Any, ...]:
+        """Delegates — HUNL has ~10^14 deals; raises NotImplementedError."""
+        return HUNLGame.all_deals()
+
+    def sample_deal(self, rng: np.random.Generator) -> tuple[int, ...]:
+        return HUNLGame.sample_deal(rng)
+
+    def state_from_deal(self, deal: tuple[int, ...]) -> AbstractedHUNLState:
+        return AbstractedHUNLState(
+            _raw=HUNLGame.state_from_deal(deal),
+            _abstractor=self.abstractor,
+        )
+
+    def terminal_utility(self, state: Any) -> float:
+        raw = state._raw if isinstance(state, AbstractedHUNLState) else state
+        return HUNLGame.terminal_utility(raw)
+
+    def encode(self, state: Any) -> np.ndarray:
+        raw = state._raw if isinstance(state, AbstractedHUNLState) else state
+        return HUNLGame.encode(raw)

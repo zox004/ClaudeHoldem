@@ -216,3 +216,143 @@ class TestHUNLCardAbstractor:
         for sig in sigs:
             score = abstractor.score_of_signature(sig)
             assert 0.0 <= score <= 1.0
+
+
+# =============================================================================
+# AbstractedHUNLState — wraps HUNLState with bucketed infoset_key (M2.2)
+# =============================================================================
+class TestAbstractedHUNLState:
+    @pytest.fixture(scope="class")
+    def game(self):  # type: ignore[no-untyped-def]
+        from poker_ai.games.hunl_abstraction import AbstractedHUNLGame
+        return AbstractedHUNLGame(n_buckets=50, n_trials=300, seed=42)
+
+    def test_state_protocol_compliance(self, game) -> None:  # type: ignore[no-untyped-def]
+        from poker_ai.games.protocol import StateProtocol
+        rng = np.random.default_rng(42)
+        deal = game.sample_deal(rng)
+        state = game.state_from_deal(deal)
+        assert isinstance(state, StateProtocol)
+
+    def test_infoset_key_is_string(self, game) -> None:  # type: ignore[no-untyped-def]
+        rng = np.random.default_rng(42)
+        deal = game.sample_deal(rng)
+        state = game.state_from_deal(deal)
+        assert isinstance(state.infoset_key, str)
+
+    def test_root_key_has_bucket_prefix(self, game) -> None:  # type: ignore[no-untyped-def]
+        rng = np.random.default_rng(42)
+        deal = game.sample_deal(rng)
+        state = game.state_from_deal(deal)
+        # Format: "<bucket>|<round>:<board>:<history>"
+        prefix = state.infoset_key.split("|")[0]
+        assert prefix.isdigit()
+        assert 0 <= int(prefix) < game.abstractor.n_buckets
+
+    def test_acting_player_perspective_bucket(self, game) -> None:  # type: ignore[no-untyped-def]
+        """At root, current_player=1 (SB), so the bucket should be P1's
+        hole-card bucket. After SB CALL, current_player=0 (BB), so the
+        bucket should switch to P0's bucket."""
+        from poker_ai.games.hunl_state import HUNLAction
+        deal = (0, 1, 2, 3, 4, 5, 6, 7, 8)   # P0 hole=(0,1), P1 hole=(2,3)
+        state = game.state_from_deal(deal)
+        # P1 acts first preflop.
+        p1_bucket = game.abstractor.bucket(deal[2], deal[3])
+        assert state.infoset_key.split("|")[0] == str(p1_bucket)
+        # After SB CALL, P0 to act.
+        state2 = state.next_state(HUNLAction.CALL)
+        p0_bucket = game.abstractor.bucket(deal[0], deal[1])
+        assert state2.infoset_key.split("|")[0] == str(p0_bucket)
+
+    def test_same_bucket_collapses_keys(self, game) -> None:  # type: ignore[no-untyped-def]
+        """Two deals where the acting player's bucket is the same must
+        produce identical root infoset_keys (proves abstraction is
+        actually aliasing)."""
+        # Find two different concrete hands with the same bucket.
+        ab = game.abstractor
+        # Sample some hands and look for collisions.
+        rng = np.random.default_rng(0)
+        bucket_to_hands: dict[int, list[tuple[int, int]]] = {}
+        for _ in range(200):
+            cards = rng.choice(52, size=2, replace=False)
+            c0, c1 = int(cards[0]), int(cards[1])
+            b = ab.bucket(c0, c1)
+            bucket_to_hands.setdefault(b, []).append((c0, c1))
+        # Find a bucket with ≥ 2 different hands.
+        for b, hands in bucket_to_hands.items():
+            if len(hands) >= 2:
+                (h0_a, h1_a), (h0_b, h1_b) = hands[0], hands[1]
+                if (h0_a, h1_a) == (h0_b, h1_b):
+                    continue
+                # Build deals: P1 (SB) holds the test hand.
+                deal_a = (
+                    20, 21, h0_a, h1_a,
+                    *[c for c in range(52) if c not in (20, 21, h0_a, h1_a)][:5],
+                )
+                deal_b = (
+                    20, 21, h0_b, h1_b,
+                    *[c for c in range(52) if c not in (20, 21, h0_b, h1_b)][:5],
+                )
+                # Skip if deals overlap card-wise.
+                try:
+                    s_a = game.state_from_deal(deal_a)
+                    s_b = game.state_from_deal(deal_b)
+                except ValueError:
+                    continue
+                assert s_a.infoset_key == s_b.infoset_key, (
+                    f"bucket {b}: hands {hands[0]} vs {hands[1]} should "
+                    f"produce same root key"
+                )
+                return   # one example is sufficient
+        pytest.skip("no two distinct hands sharing a bucket within sample")
+
+
+# =============================================================================
+# AbstractedHUNLGame — GameProtocol (M2.3)
+# =============================================================================
+class TestAbstractedHUNLGame:
+    @pytest.fixture(scope="class")
+    def game(self):  # type: ignore[no-untyped-def]
+        from poker_ai.games.hunl_abstraction import AbstractedHUNLGame
+        return AbstractedHUNLGame(n_buckets=50, n_trials=300, seed=42)
+
+    def test_game_protocol_compliance(self, game) -> None:  # type: ignore[no-untyped-def]
+        from poker_ai.games.protocol import GameProtocol
+        assert isinstance(game, GameProtocol)
+        assert game.NUM_ACTIONS == 3
+        assert game.ENCODING_DIM == 102
+
+    def test_sample_deal_delegates(self, game) -> None:  # type: ignore[no-untyped-def]
+        rng = np.random.default_rng(42)
+        deal = game.sample_deal(rng)
+        assert len(deal) == 9
+        assert len(set(deal)) == 9
+
+    def test_all_deals_raises(self, game) -> None:  # type: ignore[no-untyped-def]
+        with pytest.raises(NotImplementedError):
+            game.all_deals()
+
+    def test_state_from_deal_returns_abstracted(self, game) -> None:  # type: ignore[no-untyped-def]
+        from poker_ai.games.hunl_abstraction import AbstractedHUNLState
+        deal = (0, 1, 2, 3, 4, 5, 6, 7, 8)
+        state = game.state_from_deal(deal)
+        assert isinstance(state, AbstractedHUNLState)
+
+    def test_terminal_utility_unchanged(self, game) -> None:  # type: ignore[no-untyped-def]
+        """Wrapping doesn't change terminal_utility — abstraction only
+        aliases strategy keys, not chip math."""
+        from poker_ai.games.hunl_state import HUNLAction
+        deal = (0, 1, 2, 3, 4, 5, 6, 7, 8)
+        state = game.state_from_deal(deal)
+        terminal = state.next_state(HUNLAction.FOLD)
+        # SB folds → P0 wins SB blind.
+        assert game.terminal_utility(terminal) == pytest.approx(+1.0)
+
+    def test_encode_unchanged(self, game) -> None:  # type: ignore[no-untyped-def]
+        deal = (0, 1, 2, 3, 4, 5, 6, 7, 8)
+        ab_state = game.state_from_deal(deal)
+        from poker_ai.games.hunl import HUNLGame
+        raw_state = HUNLGame.state_from_deal(deal)
+        ab_enc = game.encode(ab_state)
+        raw_enc = HUNLGame.encode(raw_state)
+        assert np.array_equal(ab_enc, raw_enc)
