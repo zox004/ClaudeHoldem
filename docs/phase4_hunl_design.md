@@ -291,7 +291,7 @@ def terminal_utility(state):
 | Betting validity | 30 | min-raise rule, all-in, illegal-size rejection, fold-after-no-bet |
 | Round transitions | 20 | preflop → flop board reveal, turn → river, terminal at river showdown |
 | Showdown evaluation | 20 | high card, pair, two pair, …, straight flush; ties; treys cross-check |
-| All-in handling | 15 | side-pot N/A heads-up; main pot = matched amount; remainder returned |
+| All-in handling | 15 | **heads-up: no side pot ever** (side pots only arise with 3+ players, and Phase 4–5 stays 2-player); main pot = matched amount; the all-in player's excess that the opponent could not match is returned to the all-in player at terminal-utility time |
 | Edge cases | 30 | exactly all-in min raise, blind defense, ε-tie pot rounding |
 | GameProtocol compliance | 10 | NUM_ACTIONS / ENCODING_DIM constants, sample_deal uniform-ish, raises on all_deals() |
 
