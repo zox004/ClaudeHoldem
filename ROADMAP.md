@@ -188,7 +188,9 @@ CFR의 가장 작은 단위를 수학적으로 검증된 형태로 구현한다.
 
 ---
 
-## Phase 3: Leduc Deep CFR (Week 5~7)
+## Phase 3: Leduc Deep CFR (Week 5~7) — **종결 2026-04-26, NEGATIVE RESULT + path pivot**
+
+> **Phase 3 Outcome**: Brown 2019 Deep CFR이 medium-scale games (Leduc 288 infosets)에서 architectural floor (σ̄_expl 140-150) 보유 — 9일간 4 axes (Cap / Huber / advantage_epochs / T) 검증으로 확증. Exit Criteria primary metric (σ̄_expl < 50 mbb/g) MISS. **Phase 4 algorithm을 Deep CFR scale-up이 아닌 MCCFR + abstraction (Pluribus path)으로 pivot**. 자세한 분석은 `PHASE.md` Phase 3 Conclusion 섹션 + 19 educational assets 참조.
 
 ### 목표
 신경망이 regret table을 대체할 수 있음을 Leduc에서 확인한다. Deep CFR의 모든 구성요소를 손에 익힌다.
@@ -231,10 +233,12 @@ CFR의 가장 작은 단위를 수학적으로 검증된 형태로 구현한다.
 
 ---
 
-## Phase 4: RLCard NL Hold'em Deep CFR (Week 8~12)
+## Phase 4: RLCard NL Hold'em — **MCCFR + Abstraction (Pluribus path)** (Week 8~12+)
+
+> **Algorithm choice 변경 (2026-04-26)**: Phase 3 Deep CFR architectural floor 발견 후, Phase 4는 Pluribus 표준 (Linear MCCFR + card/action abstraction + subgame solving)으로 진행. Brown 2019 Deep CFR scale-up 옵션은 reference로만 보존. Step 2 (Leduc abstraction validate, < 5 mbb/g target)에서 path 검증 후 commit.
 
 ### 목표
-실제 HUNL에 근접한 환경에서 작동하는 봇을 만든다. 이 Phase가 프로젝트의 하이라이트다.
+실제 HUNL에 근접한 환경에서 작동하는 봇을 만든다. 이 Phase가 프로젝트의 하이라이트다. **Algorithm**: Linear MCCFR (Phase 2 재활용) + card abstraction (E[HS²] 버킷팅) + action abstraction (3-6 사이즈) + subgame solving (Phase 5에서 확장).
 
 ### Week 8: NLH 환경 + 인코딩 설계
 
@@ -246,13 +250,17 @@ CFR의 가장 작은 단위를 수학적으로 검증된 형태로 구현한다.
 - Betting history encoding: 4 라운드 × 최대 N 액션 × 채널
 - **`/skill`로 `poker-ai-dev` skill 활성화**
 
-### Week 9~10: Deep CFR 스케일업
+### Week 9~10: MCCFR + Abstraction 스케일업 (Pluribus path)
 
-- 네트워크 크기 확장 (hidden 256~512, 몇 개 layer)
-- Reservoir buffer 크기 키우기 (수백만)
-- Self-play data 생성 병렬화 (M1 Pro 10 코어)
+- **Algorithm**: Phase 2 MCCFR (`src/poker_ai/algorithms/mccfr.py`) 재활용 — GameProtocol 사용으로 abstracted HUNL game에 즉시 transfer
+- Card abstraction implementation:
+  - E[HS²] 버킷팅 — round 별로 50~200 buckets
+  - 또는 round-by-round refinement (preflop coarse → river fine)
+- Action abstraction: `{fold, call, 0.5 pot, 1 pot, 2 pot, all-in}` 6개 (또는 5개)
+- Self-play data 생성 병렬화 (M1 Pro 10 코어, multiprocessing.Pool)
 - **이 단계에서 학습 시간은 며칠~1주일 단위**
 - W&B dashboard에 실시간 모니터링
+- **Note**: Brown 2019 Deep CFR scale-up은 Phase 3에서 architectural floor 발견 (PHASE.md Phase 3 Conclusion 참조). Pluribus 표준 path가 우리 인프라 (M1 Pro)와 목표 (intermediate-level human bot)에 fit.
 
 ### Week 11: Baseline 대결 평가
 

@@ -5,9 +5,9 @@
 
 ## 현재 상태
 
-**Phase**: 3 진행 중 — **Day 9 T=2000 Adverse + GREEN < 10 unreachable confirmed (2026-04-26 새벽)**: σ̄_expl T=500 band 147.7 → T=1000 band 149.7 → T=2000 band **166.2** (T 축 productive 아님, 오히려 +18 worse). σ within-band grows 6.6→10.5→19.6 (estimator noise floor T에 비례). Mechanism: reservoir buffer over-saturation + linear CFR weighting at large T. **자산 #18 신규**: "Brown 2019 CFR theory σ̄_expl→0 as T→∞는 EXACT CFR 가정, Deep CFR에 strict 적용 안 됨". GREEN < 10 사실상 unreachable.
-**Phase 3 metric v5 (Day 7)**: GREEN gate = σ̄_expl < 10 mbb/g 단독. Day 9 evidence 기반 **GREEN 약화 v6 결정 시점**.
-**Day 4-8 history**: σ_seed=0.010, L-B quarantine, Huber transient/over-reg, (e) marginal, Cap saturation (140 floor), Strategy-side Cap 4.5σ robust.
+**Phase**: **3 종결, Phase 4 path 재정의 (2026-04-26)**. Brown 2019 Deep CFR이 medium-scale games (Leduc 288 infosets)에서 architectural floor 보유 — 9일 4 axes 검증 (Cap / Huber / epochs / T) 모두 σ̄_expl 140-150 floor 못 깨짐. Production HUNL 표준 (Libratus, Pluribus, DecisionHoldem) **abstraction-based**. Phase 4 = **MCCFR + abstraction (Pluribus path)**으로 pivot.
+**Next 세션 (Step 2)**: Leduc abstraction (3-bucket E[HS]) + MCCFR validate, < 5 mbb/g target. Phase 4 commit 전 path validation.
+**테스트**: **unit 385 + integration fast 10 GREEN**, ruff src clean, mypy strict clean (Phase 3 자산 보존).
 **핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
 **테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
 **Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
@@ -34,6 +34,123 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 3 Conclusion — Deep CFR architectural floor confirmed, MCCFR+abstraction pivot (2026-04-26)
+
+> Phase 3 정식 종결. 9일간 검증으로 **Brown 2019 Deep CFR이 medium-scale games (Leduc 288 infosets)에서 architectural floor**가 있음을 4 axes scan으로 확증. Phase 4는 Pluribus path (MCCFR + abstraction)으로 pivot.
+
+#### Phase 3 reframe — "Negative result로 Phase 4 path 명확화"
+
+Phase 3을 **abandonment 아닌 information-rich diagnostic phase**로 재정의:
+
+**부정 (Deep CFR direction)**:
+- Day 4 Cap (3×64→4×128): σ̄_expl 181→139 (Strategy-side 4.5σ), Primary A 0.8σ noise within
+- Day 6 Huber (loss form): transient peak T=100 +7.6σ → T=500 회귀, σ̄_expl +10.1σ catastrophic
+- Day 7 (e) advantage_epochs (training budget): Primary A +1.45σ borderline, σ̄_expl +0.45σ noise
+- Day 8 Cap+(e) 결합: σ̄_expl 141.6 ≈ Day 4 단독 saturation
+- Day 9 T axis (T=500→2000): σ̄_expl 147.7 → 166.2 ADVERSE (+18.5 mbb/g)
+- 결론: **σ̄_expl ~140-150 floor가 Brown 2019 Deep CFR의 Leduc architectural ceiling**
+
+**긍정 (Path forward)**:
+- Phase 2 MCCFR Leduc T=100k 5-seed: < 1 mbb/g 검증됨 (재활용 가능)
+- Brown 자신의 SOTA 봇 (Libratus, Pluribus): **Deep CFR 아닌 abstraction + Linear MCCFR + subgame solving**
+- Phase 4 path = Pluribus path
+
+**근거**: ROADMAP §Phase 4도 "RLCard NL Hold'em" 명시 + abstraction option B (E[HS² 버킷팅) 권장. Original ROADMAP은 Deep CFR scale-up 가정, 이를 Pluribus path로 update 권장.
+
+#### Phase 3 Exit Criteria 결과 (Original ROADMAP 기준)
+
+| Criterion | Target | 실측 | 결과 |
+|---|---|---|---|
+| Leduc Deep CFR exploitability | < 50 mbb/g | 140-150 floor | **MISS** (3× over) |
+| vs Tabular CFR ratio | ≤ 3× | 300× (Vanilla 0.46 mbb/g 대비) | MISS |
+| M1 Pro iter time | "수 초" | 11-14 s/iter (T saturation) | MARGINAL |
+| Adv net MSE 감소 곡선 | 확인 | H Tier 1 logging 으로 확인 | PASS |
+| 체크포인트 저장/로딩 | 정상 | wandb run 자동 저장 | PASS |
+
+→ Exit Criteria primary metric (σ̄_expl < 50)은 **MISS but with strong negative diagnosis**. Phase 3 retrospective notebook 대신 본 PHASE.md Conclusion 섹션 + 별도 docs/phase3_lessons.md (Step 3+Option 6에서 작성).
+
+#### 19 Educational Assets Catalog (Phase 3 acquired)
+
+| # | 자산 | 등록 Day | 검증 Phase 4 transfer |
+|---|---|---|---|
+| 1 | "RPS-style symmetric games는 ε-smoothed mixed strategy로 수렴 검증" | Phase 1 | n/a |
+| 2 | "Vanilla CFR signed regret이 CFR+ R⁺의 Deep CFR target source — reference algorithm 정정" | Day 2 pre-smoke | Yes |
+| 3 | "Pearson correlation은 affine-invariant — scale/offset mismatch hidden" | Day 2 | Yes |
+| 4 | "Capacity decouples advantage vs strategy nets — multi-seed로 정량 (Strategy 4.5σ vs Advantage 0.8σ)" | Day 5 | Yes |
+| 5 | "Correlation reference quality는 reference estimator의 data budget이 network와 matched 되어야 공정" | Day 3c | Yes |
+| 6 | "Ceiling은 single-seed / ensemble / fair-data (matched traversal) 세 구분" | Day 3c | Yes |
+| 7 | "Deep CFR network approximation efficiency는 게임 scale에 민감 (Kuhn 82% vs Leduc 27%)" | Day 3c | Yes (HUNL 더 낮을 것) |
+| 8 | "이론적 metric 설계는 data-gathering 이후 refinement 불가피 — 첫 설계는 잠정 가설" | Day 3c | Yes |
+| 9 | "Small-n (n ≤ 9) 통계는 ±0.1 fluctuation, single-checkpoint 해석 금지" | Day 4 | Yes |
+| 10 | "Multi-seed reveals true Cap signal asymmetry (Strategy-side robust, Advantage-side noise)" | Day 5 | Yes |
+| 11 | "Schmid 2019 control variate를 잘못된 node type + 빠른 EMA로 적용 시 regret signal cancel — convergence smoke (T≥50) 필수" | Day 5 Step 5 | **Yes (variance reduction try-out 시 필수)** |
+| 12 | "Single-axis variance reduction은 advantage_net→strategy_buffer→strategy_net unidirectional propagation, isolated axis 아님 (decouple은 가능 옵션 아님, downstream by design)" | Day 6 → Day 7 정정 | Yes |
+| 13 | "Deep CFR variance reduction은 unbiasedness 보존이 critical (Lemma 1). Bias 추가하는 변경은 σ̄_expl 폭발로 즉각 reveal" | Day 7 (b') review | **Yes (HUNL variance reduction checklist)** |
+| 14 | "Loss form change는 transient effect (early peak)을 만들지만 수렴 후 동일 floor — T=500 convergence smoke 필수" | Day 6 | Yes |
+| 15 | "δ choice from H Tier 1 measured target_abs_mean (PyTorch default δ=1.0 → 74% L1 — 의도 missed)" | Day 6 audit | Yes |
+| 16 | (#19로 흡수, 아래 참조) | — | — |
+| 17 | "Deep CFR σ̄_expl는 monotone decreasing 보장 안 됨 (strategy_net averaging estimator noise floor) — Tabular CFR과 다름" | Day 8 | **Yes (HUNL multi-seed/multi-checkpoint 평가)** |
+| 18 | "Deep CFR σ̄_expl(T)는 large T에서 ADVERSE 가능 (buffer over-saturation + linear weighting). Brown 2019 σ̄→0 as T→∞은 EXACT CFR 가정" | Day 9 | **Yes (HUNL T sweet spot 찾기)** |
+| **19** | **"Brown 2019 Deep CFR은 medium-scale game (288 infoset ~ 10⁷ abstraction-level)에서 architectural ceiling. Implementation correct여도 σ̄_expl floor 존재. Production HUNL bot은 abstraction-based path (Pluribus)가 표준" (#16 흡수)** | Phase 3 Conclusion | **Yes (Phase 4 algorithm choice 정당화)** |
+
+**Phase 4 transfer-critical**: #4, #11, #13, #17, #18, #19. 나머지는 일반 reference.
+
+#### 18 Self-Audit Log (멘토 6건 / 클코 12건)
+
+**멘토 자가 교정 (6건)**:
+1. Day 2 pre-smoke — CFR+ ref → Vanilla ref (Deep CFR target은 signed regret) 
+2. Day 2b-A — buffer-side → loss-side linear CFR weighting
+3. Day 3c — single-seed ceiling → fair-data (traversal-matched MCCFR ensemble) ceiling
+4. Day 5 brainstorm — Spearman → Pearson (Primary A는 np.corrcoef = Pearson)
+5. Day 7 (b') design review — bidirectional coupling 가정 → unidirectional dependency (advantage→strategy)
+6. **Day 10 — Libratus 147 mbb/g cross-game 비교 잘못 (HUNL 10^160 vs Leduc 288). Deep CFR이 우리 path 가정 자체 잘못 (Libratus/Pluribus는 abstraction-based)**
+
+**클코 자발적 audit (12건)**:
+1. Day 3c D-2 EMA root cause 추정 (α=0.99 too slow → moving target noise)
+2. Day 4 Linear CFR weighting을 가설 (d) source로 식별
+3. Day 4 wandb.mode=offline 임의 override 자가 발견 → online 재시작
+4. Day 4 Day 3b yaml [50] checkpoint missing 자가 발견
+5. Day 5 σ_seed run num_hidden_layers=3 실수 (Day 4 setting) 자가 발견 → 즉시 kill + restart 3×64
+6. Day 5 Step 5 L-B failure 즉시 진단 (self-cancellation + wrong node type double error)
+7. Day 6 Huber δ data-grounded 결정 (target_abs_mean=2.58 측정 후 δ=2.5)
+8. Day 7 (b') framing 구조적 한계 식별 (#14 표현 정정 → unidirectional)
+9. Day 7 #15 자산 도출 (Deep CFR variance reduction unbiasedness preservation 필수)
+10. Day 8 σ̄_expl monotone 가정 잘못 적용 (#17 신규)
+11. Day 9 사전 예측 "T extension -30~50 mbb/g" 틀림 (실측 +18.5), Brown 2019 무비판 적용 reflect (#18)
+12. Day 10 #19 reframe — #16 (game-scale ceiling) narrow → "Brown 2019 Deep CFR architectural floor on medium games"
+
+**총 18건 self-correction**. Phase 3 meta-pattern: **첫 설계의 hidden assumption을 data 또는 audit으로 발견 → iteration**.
+
+#### Phase 3 → Phase 4 transition justification
+
+| 근거 | 내용 |
+|---|---|
+| **Deep CFR 한계** | 4 axes (Cap/Huber/eps/T) σ̄_expl 140-150 floor, GREEN < 10 unreachable |
+| **Brown 2019 Deep CFR이 우리 목표 (CLAUDE.md "중급자 인간 이기기")에 wrong tool** | Libratus/Pluribus 모두 abstraction-based, Deep CFR 아님 |
+| **Phase 2 MCCFR 재활용 가능** | Leduc T=100k 5-seed < 1 mbb/g 검증됨, GameProtocol 사용으로 abstracted game에 즉시 transfer |
+| **Pluribus path 검증됨** | 64-CPU + Linear MCCFR + abstraction + subgame solving = superhuman HUNL bot 표준 |
+| **ROADMAP §Phase 4 Option B (E[HS² 버킷팅) 권장**과 일치 |
+
+→ **Phase 4 = MCCFR + abstraction + (subgame solving Phase 5)**. Original ROADMAP "Deep CFR scale-up" 부분은 Pluribus path로 update.
+
+#### Step 2 (next session) — Leduc abstraction validate
+
+**목적**: Phase 4 commit 전 Pluribus path Leduc 검증. Phase 2 MCCFR < 1 mbb/g + abstraction이 < 5 mbb/g 도달하는지 확인.
+
+**설계**:
+- Card abstraction: Leduc 6 cards (J/Q/K) → 3 buckets (low J / mid Q / high K), E[HS] = card rank ordinal
+- Action abstraction: 이미 3 actions (FCR), additional minimal
+- Code: `src/poker_ai/games/abstracted_leduc.py` (GameProtocol implements, leduc.py wrap)
+- MCCFR: Phase 2 코드 무수정 (game-agnostic)
+- Run: T=100k, 5 seeds, multiprocessing.Pool
+
+**기대**:
+- abstracted < 5 mbb/g → **Phase 4 path commit (Pluribus)**
+- 5-20 mbb/g → abstraction granularity tuning 필요 (3 → 6 buckets 등)
+- > 20 mbb/g → MCCFR + abstraction path도 위험, scope 재평가
+
+**비용**: $0, 3-5일 (abstraction code + tests + 5-seed run + analysis).
 
 ### Phase 3 Day 9 — T=2000 multi-checkpoint, T axis ADVERSE (2026-04-26 새벽)
 
