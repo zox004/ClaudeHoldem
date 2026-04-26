@@ -195,6 +195,16 @@ recommends compact rank/suit for M1** since M1's MCCFR is tabular; the
 one-hot encoder can be added later if we revive Deep CFR (we won't,
 per Phase 3 conclusion). Confirm.
 
+**M2 reconsideration (mentor sign-off 2026-04-26)**: compact integer
+rank encoding is acceptable for M1 because MCCFR-tabular treats
+infoset_keys as opaque strings — there is no ordinal-vs-categorical
+signal to learn. **At M2 onwards, if a value network or any neural
+component is reintroduced**, the compact encoding must be replaced
+with one-hot (or a learned embedding) — otherwise rank ordinality
+("rank 7 = rank 6 + 1") leaks a false linear structure into the
+input that the network may exploit incorrectly. Recorded here so
+the M2 transition does not silently re-use the M1 encoding.
+
 Per-slot betting history encoding (mentor's padding-first call):
 ```
 slot = (action_id ∈ {0=fold, 1=call, 2=bet}, normalised_size: float)
@@ -304,7 +314,10 @@ passes.
 
 M1 review checkpoint: GREEN tests + GameProtocol compliance verified
 + Phase 2 MCCFR runs 1 iter on HUNLGame without error (no learning
-expected — sanity only).
+expected — sanity only) + **traversals/sec baseline measurement
+during the smoke run** (mentor's optional GREEN gate addition,
+2026-04-26 sign-off; serves as M2/M3 abstraction comparison
+reference; cost is ~1 line in the smoke script).
 
 ## Risk register
 
@@ -314,7 +327,7 @@ expected — sanity only).
 | Betting history padding length insufficient (>10 actions/round real) | log overflows, increase post-M2 if observed |
 | State immutability cost on hot path (frozen dataclass copy overhead) | benchmark M1 close; pre-allocate path if needed |
 | Hand evaluator speed | profile post-M1; fall back to NumPy-vectorised in Phase 5 |
-| Stack-depth contract change later | wrap as a parameter, defaults 100 BB, switch is one config line |
+| Stack-depth contract change later | wrap as a parameter, defaults 100 BB, switch is one config line. **HUNLGame.__init__ takes ``starting_stack: float = 100.0`` (BB units); state.stacks initialised from it; terminal_utility caps at min(stacks) for all-in resolution. Changing 100 → 200 / 50 BB is a single yaml line.** |
 
 ---
 
