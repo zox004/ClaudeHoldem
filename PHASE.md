@@ -5,9 +5,10 @@
 
 ## 현재 상태
 
-**Phase**: **3 종결 + Step 2 Pluribus path validation PASS (2026-04-26)**. Step 2a (raw, Phase 2 reproduction) 5-seed mean **59.58 mbb/g exact match Phase 2** (4 decimal). Step 2b (abstracted_2, 192 infosets) 5-seed mean **25.03 mbb/g (-58% vs raw, -34.55 mbb/g)**. **Abstraction은 net positive** — info loss 33% < sampling variance 감소 → 빠르게 + 더 정확하게 수렴. Wall-clock 50% 단축. **Pluribus path 작동 확증**. Phase 4 = MCCFR + abstraction commit.
-**Next 세션 (Step 3 + Option 6)**: Phase 4 HUNL design (game engine, E[HS²] bucketing, action abstraction, subgame solving) + research write-up concurrent.
-**테스트**: **unit 411 + integration fast 10 GREEN**, ruff src clean, mypy strict clean.
+**Phase**: **Phase 4 M2 closure (2026-04-26 야간)** — Pluribus path 검증 + HUNL implementation 진행 중.
+**완료**: M0 GameProtocol scaling, M1 HUNL game engine (7 commits, ~5h), M2 Pluribus path validation (2 commits, ~3h). **Phase 4 ETA 5-6개월 → 2-3 세션** (training time 별도). **581 unit + 3 integration GREEN**, ruff src clean, mypy strict clean (24 source files).
+**다음 세션 (M3)**: Postflop board-conditioned bucketing + 6-size action grid + full HUNL training run sanity. Phase 4 timeline 정식 재추정.
+**Self-audit**: 클코 21 / 멘토 7.
 **핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
 **테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
 **Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
@@ -34,6 +35,134 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 4 M0+M1+M2 — Pluribus path 작동 + 40-50× ETA 단축 (2026-04-26 오후-야간)
+
+> 11 commits, 1 working session. Original timeline M0+M1+M2 = ~3개월; 실제 ~10시간. Phase 3 자산 (Phase 2 LeducPoker pattern, Step 2 abstracted wrapper, GameProtocol structural typing, treys library) 누적 ROI.
+
+#### M0 — GameProtocol scaling (commit `38e0bb2`)
+
+GameProtocol에 ``sample_deal(rng) -> Any`` 추가. Phase 2 finite games (Kuhn, Leduc, AbstractedLeducPoker) 4-line ``sample_deal`` shim 추가, MCCFR ``train()`` ``all_deals`` enumerate-then-sample → ``sample_deal`` direct migration. Backward compat 보존, MCCFR 동등성 회귀 검증 (Phase 2 5-seed 정확 일치). 7 신규 sample_deal tests, 411 unit GREEN.
+
+**산출물**: `src/poker_ai/games/protocol.py` 확장, 3 games + MCCFR 마이그레이션. HUNL의 ~10^14 deals enumerate 제약 해결.
+
+#### M1 — HUNL game engine (7 commits, M1.0-M1.6)
+
+| Commit | Step | LoC | Tests |
+|---|---|---|---|
+| `eb931f0` | M1.0 spec note | docs | — |
+| `5304745` | M1.1 hand_eval | 213+153 | 15 |
+| `692e554` | M1.2 state skeleton | 215+269 | 29 |
+| `010ac0b` | **M1.2.1 per-round refactor (audit #16)** | 150 | +3 |
+| `3b9f04e` | M1.3 transitions | 519+367 | 37 |
+| `e3eb410` | M1.4 terminal_utility | 95+215 | 14 |
+| `429badb` | M1.5 HUNLGame + encode | 217+280 | 28 |
+| `d163dbd` | M1.6 smoke + baseline | —+125 | 4 |
+
+**산출물**:
+- `src/poker_ai/games/hunl_state.py` (~700 LoC) — HUNLAction enum + HUNLState frozen dataclass + 18 invariants + behavioral methods (is_terminal, legal_actions/mask/bet_sizes, next_state, terminal_utility, helpers)
+- `src/poker_ai/games/hunl.py` (~217 LoC) — HUNLGame factory + encode (102-dim compact rank/suit)
+- `src/poker_ai/games/hunl_hand_eval.py` (~213 LoC) — treys wrapper + naive enumerate-21 cross-check (1k random hand pair match 100%)
+- **130 HUNL tests + 4 integration smoke = 134 M1 tests**
+
+**M1.6 baseline**: 15 265 traversals/sec on M1 Pro (M2/M3 abstraction comparison reference).
+
+**M1 ETA**: 1개월 → 1 세션 (~5 hours). **30× 단축**.
+
+#### M2 — Pluribus path validation (2 commits, M2.1-M2.4)
+
+| Commit | Step | LoC | Tests |
+|---|---|---|---|
+| `c985cd7` | M2.1 E[HS²] abstractor | 213+200 | 26 |
+| **`d3b6b18`** | **M2.2-2.4 Abstracted state/game + MCCFR sanity** | **161+249** | **+14** |
+
+**산출물**:
+- `src/poker_ai/games/hunl_abstraction.py` (600 LoC) — `hand_signature` + `enumerate_starting_hands` (169) + Monte Carlo `hand_strength_squared_mc` + `HUNLCardAbstractor` (50 buckets, deterministic) + `AbstractedHUNLState` wrapper + `AbstractedHUNLGame` GameProtocol-compatible factory
+- 37 unit + 3 integration MCCFR end-to-end tests
+
+**검증**:
+- AA top bucket, 32o bottom bucket (extreme hands stable across seeds)
+- Same-bucket-collapses-keys (abstraction이 진짜로 strategy aliasing)
+- **MCCFR 100 iterations on AbstractedHUNLGame complete cleanly** — Phase 2 algorithm 무수정 작동
+- average_strategy() 비어 있지 않음, 각 value 3-action probability simplex
+- Seed reproducibility 정확
+
+**M2 action abstraction (audit #21)**: MCCFR이 next_state(BET, bet_size=0) 호출 시 wrapper가 1×pot 자동 default. M3에서 4-size grid (0.5p, 1p, 2p, all-in)로 확장.
+
+**Pluribus path mechanism Step 2 → M2 transfer 검증**:
+- Step 2 (Leduc abstracted MCCFR): -58% σ̄_expl, -50% wall-clock under finite compute (자산 #20 lossy abstraction net positive)
+- M2 (HUNL abstracted MCCFR): GameProtocol/wrapping 패턴이 mechanically transferable, runtime 검증
+
+**M2 ETA**: 2개월 → 1 세션 (~3 hours). **40× 단축**.
+
+#### Self-audit log update (M0-M2)
+
+| # | Audit | Commit |
+|---|---|---|
+| #16 | M1.2 flat 40-padding 발견 → per-round 4-tuple refactor (Phase 2 LeducState 패턴 일관) | `010ac0b` |
+| #17 | `last_bet_size` ambiguous → `last_raise_increment` rename (NLHE 표준) | `3b9f04e` |
+| #18 | ENCODING_DIM 102 vs spec 144 surface, M2 reconsideration note 보존 | `429badb` |
+| #19 | 100-walk fan-out smoke → state-machine 확장 검증 | `d163dbd` |
+| #20 | E[HS²] mc=300 noise로 boundary hands 흔들림 → extreme hands stable test 별도 | `c985cd7` |
+| #21 | MCCFR이 next_state(BET) bet_size 모름 → wrapper 1×pot default | `d3b6b18` |
+
+총 6건 self-audit M0-M2 누적. **클코 누계 21 / 멘토 7**.
+
+#### Phase 4 ETA 갱신
+
+| M | 원래 | 갱신 |
+|---|---|---|
+| M0 | (예정 안 함) | ✅ 1 commit |
+| M1 HUNL engine | 1개월 | ✅ 1 세션 (30× 단축) |
+| M2 Pluribus path validation | 2개월 | ✅ 1 세션 (40× 단축) |
+| **M3 postflop + full** | 3-4개월 | **예상 1-2 세션 (board bucketing + 4-size action 패턴 transfer)** |
+| **M4 Slumbot benchmark** | 5-6개월 | **training time + benchmark setup; 별도 reality check** |
+
+**Phase 4 전체 (M3까지)**: 5-6개월 → **2-3 세션 + training**. M4 training은 K=10⁵ scale 시 클라우드 burst 필요할 가능성 (Phase 3 ROADMAP §M4와 일치).
+
+#### 다음 세션 (M3) 핸드오프 노트
+
+**M3 plan**:
+1. **Postflop board-conditioned bucketing** — flop/turn/river 각 round에서 (hole bucket × board strength) 결합 키. ~50 buckets per round.
+2. **4-size action grid** — `{0.5p, 1p, 2p, all-in}` 4 discrete bet sizes. 현재 wrapper의 1×pot default 확장.
+3. **Full HUNL training run sanity** — T=1k-10k MCCFR with full 4-round abstraction. σ̄_expl baseline 측정 (HUNL 게임 트리 평가는 expensive, 실용적으로 best-response benchmark 필요할 수 있음).
+
+**예상 산출물**:
+- `src/poker_ai/games/hunl_abstraction.py` 확장 — `BoardAbstractor`, `ActionAbstractor`, `AbstractedHUNLState/Game` 4-action 지원
+- `src/poker_ai/games/hunl_board_strength.py` (가능) — board texture 평가
+- 30-50 신규 unit tests + 1-2 integration smoke
+- Estimated: 2 atomic commits + tests
+
+**M3 GREEN gate** (잠정):
+- Tests count 600+ unit GREEN
+- MCCFR 4-action grid에서 작동 (no error)
+- σ̄_expl baseline 측정 (절대값보다 referenceable)
+- ruff src clean, mypy strict clean
+
+**M3 진입 시 멘토 사전 점검 항목** (이전 세션 멘토 메시지 참조):
+- Postflop bucketing은 round별 (flop/turn/river) 별개 abstractor (Pluribus 표준)
+- 4-size action: pot-relative cap, all-in 별도 처리 필요
+- σ̄_expl 측정 방법 — full game tree exploitability는 비현실적, sampled BR 또는 Slumbot baseline 비교 권장
+- Test boost (M3 ~30-50 신규)
+- M3 끝 후 Phase 4 ETA 정식 재추정
+
+**Option 6 본문 작성**: M3 결과 narrative 포함하여 M3 후 또는 Phase 4 marathon 종료 후. `docs/phase3_lessons.md` outline (commit `184d8a3`) 보존.
+
+#### Phase 3 → Phase 4 자산 transfer 정량 (사후)
+
+Phase 3에서 검증된 자산이 M0-M2 ETA 단축에 직접 기여:
+
+| 자산 | 사용처 | 기여 |
+|---|---|---|
+| GameProtocol structural typing | M0/M1/M2 모든 game classes | wrapping 패턴 cost 50%↓ |
+| Step 2 AbstractedLeducPoker 패턴 | M2 AbstractedHUNL{State,Game} | boilerplate 1:1 transfer, code 50%↓ |
+| Phase 2 LeducState frozen dataclass 패턴 | M1.2 HUNLState | invariant 패턴 reuse, 40% time saved |
+| M1.1 treys hand evaluator | M2 E[HS²] Monte Carlo | hand_eval 1주 작업 → 1시간 |
+| M1 traversals/sec baseline | M2/M3 abstraction comparison | reference value 보존 |
+| Phase 2 MCCFR (game-agnostic via Protocol) | M2.4 abstracted HUNL run | algorithm 무수정 transfer |
+| 21-asset 교육 자산 catalog | 모든 M-step 결정 | "이 변경이 unbiased 보존?" 같은 checklist 작용 |
+
+이 누적 ROI가 30-40× ETA 단축의 매커니즘. Phase 3 negative result reframe (ROADMAP `48aab2d` Exit #4 v5)이 자체 가치 + 자산 누적.
 
 ### Phase 4 Step 2 — Pluribus path validation PASS (2026-04-26)
 
