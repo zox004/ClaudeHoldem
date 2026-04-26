@@ -1,0 +1,53 @@
+# @package _global_
+# Phase 4 Step 2 — Leduc MCCFR + abstraction validate.
+#
+# Two configurations driven by ``game_choice``:
+#   raw            : LeducPoker (Phase 2 reproduction baseline)
+#   abstracted_2   : AbstractedLeducPoker(n_buckets=2)  ({J,Q} → L, {K} → H)
+#   abstracted_3   : AbstractedLeducPoker(n_buckets=3)  (identity sanity)
+#
+# Step 2a: ``game_choice=raw`` — verifies Phase 2 MCCFR result reproduces.
+# Step 2b: ``game_choice=abstracted_2`` — measures abstraction overhead.
+#
+# Exit Criteria (mentor sign-off, Phase 4 Step 2):
+#   Step 2a (raw)        : final mbb/g matches Phase 2 baseline ± seed noise
+#   Step 2b (abstracted) : < 5 mbb/g → Pluribus path commit
+#                          5-20 mbb/g → bucket granularity tuning needed
+#                          > 20 mbb/g → path re-evaluation
+#
+# Run (Step 2a + 2b sequentially or via separate launches):
+#   uv run python -m experiments.phase4_step2_leduc_mccfr game_choice=raw
+#   uv run python -m experiments.phase4_step2_leduc_mccfr game_choice=abstracted_2
+
+experiment_name: phase4_step2_leduc_mccfr
+iterations: 100000
+seeds: [42, 123, 456, 789, 1024]
+epsilon: 0.05
+n_actions: 3
+big_blind: 2.0
+
+# Game selector — see file docstring above for valid values.
+game_choice: raw
+
+parallel: true
+log_every: 200
+dense_prefix: 10
+
+# Step 2 thresholds (Phase 4 Step 2 design).
+exit_criterion_mbb: 5.0           # Pluribus path GREEN for abstracted Leduc
+expected_final_mbb: 50.0          # Phase 2 5-seed mean ~60 mbb/g at T=10k; T=100k expected ~10-30 mbb/g
+phase2_baseline_mbb: 59.6         # Phase 2 Day 6 5-seed mean (per-seed expl mean)
+
+wandb:
+  project: poker-ai-hunl
+  tags: [phase4, step2, leduc, mccfr, abstraction]
+  mode: online
+
+hydra:
+  run:
+    dir: experiments/outputs/${experiment_name}/${now:%Y%m%d-%H%M%S}_${game_choice}
+  sweep:
+    dir: experiments/outputs/${experiment_name}/multirun/${now:%Y%m%d-%H%M%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false
