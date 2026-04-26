@@ -382,13 +382,13 @@ class TestAbstractedHUNLStateInfosetKeyM31:
 
     def _drive_to_postflop(self, game, deal):  # type: ignore[no-untyped-def]
         """Helper: SB CALL + BB CHECK closes preflop, advancing to flop."""
-        from poker_ai.games.hunl_state import HUNLAction
+        from poker_ai.games.hunl_abstraction import AbstractedHUNLAction
 
         state = game.state_from_deal(deal)
         # Preflop: SB (player 1) CALL.
-        state = state.next_state(HUNLAction.CALL)
+        state = state.next_state(AbstractedHUNLAction.CALL)
         # Preflop: BB (player 0) CHECK (modeled as CALL when no bet open).
-        state = state.next_state(HUNLAction.CALL)
+        state = state.next_state(AbstractedHUNLAction.CALL)
         return state
 
     def test_preflop_key_unchanged(self, game) -> None:  # type: ignore[no-untyped-def]
@@ -431,13 +431,13 @@ class TestAbstractedHUNLStateInfosetKeyM31:
 
     def test_turn_and_river_key_use_board_bucket(self, game) -> None:  # type: ignore[no-untyped-def]
         """Same single-int board segment contract applies to turn & river."""
-        from poker_ai.games.hunl_state import HUNLAction
+        from poker_ai.games.hunl_abstraction import AbstractedHUNLAction
 
         deal = (0, 1, 2, 3, 4, 5, 6, 7, 8)
         # Drive to flop, then close flop with check-check to reach turn.
         state = self._drive_to_postflop(game, deal)
-        state = state.next_state(HUNLAction.CALL)   # BB check
-        state = state.next_state(HUNLAction.CALL)   # SB check → turn
+        state = state.next_state(AbstractedHUNLAction.CALL)   # BB check
+        state = state.next_state(AbstractedHUNLAction.CALL)   # SB check → turn
         assert state._raw.current_round == 2
         key_turn = state.infoset_key
         _, rest = key_turn.split("|", 1)
@@ -446,8 +446,8 @@ class TestAbstractedHUNLStateInfosetKeyM31:
         assert "," not in board_part and board_part.isdigit()
 
         # Close turn → river.
-        state = state.next_state(HUNLAction.CALL)
-        state = state.next_state(HUNLAction.CALL)
+        state = state.next_state(AbstractedHUNLAction.CALL)
+        state = state.next_state(AbstractedHUNLAction.CALL)
         assert state._raw.current_round == 3
         key_river = state.infoset_key
         _, rest = key_river.split("|", 1)
@@ -570,14 +570,16 @@ class TestAbstractedHUNLGameWithPostflopAbstractor:
         """Smoke: walking from preflop to flop and reading infoset_key
         twice on the same state should bump the postflop abstractor's
         cache stats. This is the integration handle MCCFR will rely on."""
-        from poker_ai.games.hunl_abstraction import AbstractedHUNLGame
-        from poker_ai.games.hunl_state import HUNLAction
+        from poker_ai.games.hunl_abstraction import (
+            AbstractedHUNLAction,
+            AbstractedHUNLGame,
+        )
 
         game = AbstractedHUNLGame(n_buckets=10, n_trials=200, seed=42)
         deal = (0, 1, 2, 3, 4, 5, 6, 7, 8)
         state = game.state_from_deal(deal)
-        state = state.next_state(HUNLAction.CALL)   # SB call
-        state = state.next_state(HUNLAction.CALL)   # BB check → flop
+        state = state.next_state(AbstractedHUNLAction.CALL)   # SB call
+        state = state.next_state(AbstractedHUNLAction.CALL)   # BB check → flop
         # First read: cache miss.
         _ = state.infoset_key
         # Second read on the same state: cache hit.

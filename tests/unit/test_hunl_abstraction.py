@@ -253,14 +253,14 @@ class TestAbstractedHUNLState:
         """At root, current_player=1 (SB), so the bucket should be P1's
         hole-card bucket. After SB CALL, current_player=0 (BB), so the
         bucket should switch to P0's bucket."""
-        from poker_ai.games.hunl_state import HUNLAction
+        from poker_ai.games.hunl_abstraction import AbstractedHUNLAction
         deal = (0, 1, 2, 3, 4, 5, 6, 7, 8)   # P0 hole=(0,1), P1 hole=(2,3)
         state = game.state_from_deal(deal)
         # P1 acts first preflop.
         p1_bucket = game.abstractor.bucket(deal[2], deal[3])
         assert state.infoset_key.split("|")[0] == str(p1_bucket)
         # After SB CALL, P0 to act.
-        state2 = state.next_state(HUNLAction.CALL)
+        state2 = state.next_state(AbstractedHUNLAction.CALL)
         p0_bucket = game.abstractor.bucket(deal[0], deal[1])
         assert state2.infoset_key.split("|")[0] == str(p0_bucket)
 
@@ -319,7 +319,9 @@ class TestAbstractedHUNLGame:
     def test_game_protocol_compliance(self, game) -> None:  # type: ignore[no-untyped-def]
         from poker_ai.games.protocol import GameProtocol
         assert isinstance(game, GameProtocol)
-        assert game.NUM_ACTIONS == 3
+        # M3.2: NUM_ACTIONS lifted from 3 (raw HUNLGame) to 6
+        # (AbstractedHUNLAction grid).
+        assert game.NUM_ACTIONS == 6
         assert game.ENCODING_DIM == 102
 
     def test_sample_deal_delegates(self, game) -> None:  # type: ignore[no-untyped-def]
@@ -341,10 +343,10 @@ class TestAbstractedHUNLGame:
     def test_terminal_utility_unchanged(self, game) -> None:  # type: ignore[no-untyped-def]
         """Wrapping doesn't change terminal_utility — abstraction only
         aliases strategy keys, not chip math."""
-        from poker_ai.games.hunl_state import HUNLAction
+        from poker_ai.games.hunl_abstraction import AbstractedHUNLAction
         deal = (0, 1, 2, 3, 4, 5, 6, 7, 8)
         state = game.state_from_deal(deal)
-        terminal = state.next_state(HUNLAction.FOLD)
+        terminal = state.next_state(AbstractedHUNLAction.FOLD)
         # SB folds → P0 wins SB blind.
         assert game.terminal_utility(terminal) == pytest.approx(+1.0)
 

@@ -474,6 +474,90 @@ class PostflopBoardAbstractor:
 
 
 # =============================================================================
+# Abstracted action grid (M3.2) — 6 discrete actions over a continuous bet space
+# =============================================================================
+class AbstractedHUNLAction(IntEnum):
+    """6-way discrete action grid for the abstracted HUNL game.
+
+    Values 0/1 deliberately match raw :class:`HUNLAction.FOLD/CALL` so
+    that ``int(action)`` is interchangeable for those two; values 2..5
+    are abstracted-only (raw HUNLAction.BET=2 lives in a separate enum
+    class so there is no semantic collision). Bet-size dispatch is
+    handled by :func:`compute_size`.
+
+    Pluribus path standard (Brown & Sandholm 2019). Corresponds to
+    OpenSpiel ACPC's `{fold, call, 0.5pot, pot, 2pot, all-in}` set.
+    """
+
+    FOLD = 0
+    CALL = 1
+    BET_HALF = 2     # raw bet_size = int(0.5 * state.pot)
+    BET_POT = 3      # raw bet_size = state.pot
+    BET_DOUBLE = 4   # raw bet_size = 2 * state.pot
+    BET_ALLIN = 5    # raw bet_size = state.legal_bet_sizes()[-1]
+
+
+_BET_ENUMS: Final[tuple[AbstractedHUNLAction, ...]] = (
+    AbstractedHUNLAction.BET_HALF,
+    AbstractedHUNLAction.BET_POT,
+    AbstractedHUNLAction.BET_DOUBLE,
+    AbstractedHUNLAction.BET_ALLIN,
+)
+
+
+def compute_size(action: AbstractedHUNLAction, state: HUNLState) -> int:
+    """Returns the raw bet_size (total round contribution) that the
+    given abstracted BET_* enum dispatches to.
+
+    Raises :class:`ValueError` for non-BET enum members; raises
+    :class:`IndexError` from ``legal_bet_sizes()[-1]`` if BET is not
+    legal at all in this state — callers must check legality first.
+    """
+    if action == AbstractedHUNLAction.BET_HALF:
+        return int(0.5 * state.pot)
+    if action == AbstractedHUNLAction.BET_POT:
+        return state.pot
+    if action == AbstractedHUNLAction.BET_DOUBLE:
+        return 2 * state.pot
+    if action == AbstractedHUNLAction.BET_ALLIN:
+        return state.legal_bet_sizes()[-1]
+    raise ValueError(f"compute_size only handles BET_* enums; got {action!r}")
+
+
+def _bet_mask(state: HUNLState) -> dict[AbstractedHUNLAction, bool]:
+    """Computes per-BET-enum legality with the canonical-collision rule.
+
+    A BET_* enum is legal iff (a) raw HUNLAction.BET is legal at this
+    state, (b) :func:`compute_size` lies inside ``legal_bet_sizes()``
+    range, and (c) no smaller-valued BET_* enum already maps to the
+    same raw bet_size. Rule (c) prevents short-stack ambiguity (e.g.
+    when ``stack ≈ pot`` so BET_POT and BET_ALLIN dispatch to the
+    same raw size — only BET_POT survives, BET_ALLIN is masked out).
+    OpenSpiel ACPC convention.
+    """
+    out: dict[AbstractedHUNLAction, bool] = {a: False for a in _BET_ENUMS}
+    if HUNLAction.BET not in state.legal_actions():
+        return out
+    sizes = state.legal_bet_sizes()
+    if not sizes:
+        return out
+    lo, hi = sizes[0], sizes[-1]
+    seen: dict[int, AbstractedHUNLAction] = {}
+    for a in _BET_ENUMS:
+        try:
+            sz = compute_size(a, state)
+        except (IndexError, ValueError):
+            continue
+        if not lo <= sz <= hi:
+            continue
+        if sz in seen:
+            continue
+        seen[sz] = a
+        out[a] = True
+    return out
+
+
+# =============================================================================
 # AbstractedHUNLState — wraps HUNLState with abstracted infoset_key (M2.2)
 # =============================================================================
 @dataclass(frozen=True, slots=True)
@@ -569,40 +653,55 @@ class AbstractedHUNLState:
         )
 
     def legal_actions(self) -> tuple[IntEnum, ...]:
-        return self._raw.legal_actions()
+        """Returns the 6-way :class:`AbstractedHUNLAction` subset legal
+        at this state. M3.2 contract."""
+        mask = self.legal_action_mask()
+        return tuple(
+            AbstractedHUNLAction(i) for i in range(6) if mask[i]
+        )
 
     def legal_action_mask(self) -> np.ndarray:
-        return self._raw.legal_action_mask()
+        """Returns a length-6 binary mask over
+        :class:`AbstractedHUNLAction`. M3.2 contract.
 
-    def legal_bet_sizes(self) -> tuple[int, ...]:
-        return self._raw.legal_bet_sizes()
+        FOLD/CALL legality mirror the raw state. BET_* legality applies
+        the canonical-collision rule from :func:`_bet_mask` (smaller
+        enum value wins on raw-bet_size collision)."""
+        raw_mask = self._raw.legal_action_mask()
+        out = np.zeros(6, dtype=raw_mask.dtype)
+        out[AbstractedHUNLAction.FOLD] = raw_mask[HUNLAction.FOLD]
+        out[AbstractedHUNLAction.CALL] = raw_mask[HUNLAction.CALL]
+        bets = _bet_mask(self._raw)
+        for a in _BET_ENUMS:
+            out[a] = 1 if bets[a] else 0
+        return out
 
     def next_state(
-        self, action: HUNLAction, bet_size: int = 0
+        self, action: AbstractedHUNLAction
     ) -> AbstractedHUNLState:
-        """Applies the abstracted action.
+        """Applies an :class:`AbstractedHUNLAction`, dispatching to the
+        raw HUNL game tree. Bet size is determined by the enum
+        (:func:`compute_size`) — there is no separate ``bet_size``
+        kwarg.
 
-        **M2 action abstraction**: when ``action == HUNLAction.BET`` and
-        ``bet_size == 0`` (the default — algorithms like MCCFR don't
-        know bet sizes), substitute a 1×pot-size raise capped at the
-        legal max. This collapses the continuous bet space onto a
-        single discrete BET action so MCCFR / Vanilla CFR can run on
-        the wrapper without modification. M3 will widen this to the
-        full {0.5p, 1p, 2p, all-in} 4-size set per the design spec.
-        """
-        if action == HUNLAction.BET and bet_size == 0:
-            # Auto-pick: 1× pot, clamped to legal range.
-            sizes = self._raw.legal_bet_sizes()
-            if not sizes:
-                raise ValueError(
-                    "BET action selected but legal_bet_sizes is empty"
-                )
-            target = self._raw.pot   # 1× pot total
-            # Clamp into [min, max].
-            chosen = max(sizes[0], min(sizes[-1], target))
-            bet_size = chosen
+        Raises :class:`ValueError` when ``action`` is not legal at this
+        state per :meth:`legal_action_mask` (covers raw illegality,
+        out-of-range BET sizes, and canonical collisions)."""
+        mask = self.legal_action_mask()
+        if not mask[int(action)]:
+            raise ValueError(
+                f"action {action!r} is not legal in this state "
+                f"(mask={mask.tolist()})"
+            )
+        if action == AbstractedHUNLAction.FOLD:
+            raw_next = self._raw.next_state(HUNLAction.FOLD)
+        elif action == AbstractedHUNLAction.CALL:
+            raw_next = self._raw.next_state(HUNLAction.CALL)
+        else:
+            sz = compute_size(action, self._raw)
+            raw_next = self._raw.next_state(HUNLAction.BET, bet_size=sz)
         return AbstractedHUNLState(
-            _raw=self._raw.next_state(action, bet_size=bet_size),
+            _raw=raw_next,
             _abstractor=self._abstractor,
             _postflop_abstractor=self._postflop_abstractor,
         )
@@ -630,7 +729,7 @@ class AbstractedHUNLGame:
     Pluribus uses.
     """
 
-    NUM_ACTIONS: int = HUNLGame.NUM_ACTIONS
+    NUM_ACTIONS: int = 6   # M3.2: 6-way AbstractedHUNLAction grid
     ENCODING_DIM: int = HUNLGame.ENCODING_DIM
 
     def __init__(
