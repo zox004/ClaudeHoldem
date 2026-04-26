@@ -60,6 +60,17 @@ class TestHUNLAction:
 # =============================================================================
 # HUNLState — fixture builder
 # =============================================================================
+_EMPTY_ROUND_HIST: tuple[
+    tuple[HUNLAction, ...],
+    tuple[HUNLAction, ...],
+    tuple[HUNLAction, ...],
+    tuple[HUNLAction, ...],
+] = ((), (), (), ())
+_EMPTY_ROUND_SIZES: tuple[
+    tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]
+] = ((), (), (), ())
+
+
 def _root_state(
     *,
     private_cards: tuple[int, int, int, int] = (0, 1, 2, 3),
@@ -71,18 +82,21 @@ def _root_state(
     stack_p1: int = STARTING_STACK_CHIPS,
     last_bet_size: int = 0,
     pot: int = 0,
-    betting_history: tuple[HUNLAction, ...] = tuple(
-        [HUNLAction.NULL_PADDING] * HISTORY_MAX_LEN
-    ),
-    betting_sizes: tuple[int, ...] = tuple([0] * HISTORY_MAX_LEN),
+    round_history: tuple[
+        tuple[HUNLAction, ...], tuple[HUNLAction, ...],
+        tuple[HUNLAction, ...], tuple[HUNLAction, ...],
+    ] = _EMPTY_ROUND_HIST,
+    round_bet_sizes: tuple[
+        tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]
+    ] = _EMPTY_ROUND_SIZES,
 ) -> HUNLState:
     """Builds a valid HUNLState with the given overrides."""
     return HUNLState(
         private_cards=private_cards,
         pending_board=pending_board,
         board_cards=board_cards,
-        betting_history=betting_history,
-        betting_sizes=betting_sizes,
+        round_history=round_history,
+        round_bet_sizes=round_bet_sizes,
         current_round=current_round,
         current_player=current_player,
         stack_p0=stack_p0,
@@ -222,20 +236,51 @@ class TestHUNLStateInvariants:
             # current_round=0 (preflop) requires 0 board cards.
             _root_state(board_cards=(4, 5, 6), current_round=0)
 
-    def test_betting_history_length_must_be_40(self) -> None:
-        short_history = tuple([HUNLAction.NULL_PADDING] * 5)
-        with pytest.raises(ValueError, match="betting_history"):
-            _root_state(betting_history=short_history)
+    def test_round_history_must_be_4_tuples(self) -> None:
+        with pytest.raises(ValueError, match="round_history"):
+            _root_state(round_history=((), (), ()))  # type: ignore[arg-type]
 
-    def test_betting_sizes_length_must_be_40(self) -> None:
-        with pytest.raises(ValueError, match="betting_sizes"):
-            _root_state(betting_sizes=tuple([0] * 5))
+    def test_round_bet_sizes_must_be_4_tuples(self) -> None:
+        with pytest.raises(ValueError, match="round_bet_sizes"):
+            _root_state(round_bet_sizes=((), (), ()))  # type: ignore[arg-type]
 
-    def test_betting_sizes_non_negative(self) -> None:
-        bad = list([0] * HISTORY_MAX_LEN)
-        bad[3] = -1
-        with pytest.raises(ValueError, match="betting_sizes"):
-            _root_state(betting_sizes=tuple(bad))
+    def test_round_history_and_sizes_must_align(self) -> None:
+        bad_hist = (
+            (HUNLAction.CALL, HUNLAction.CALL),  # length 2
+            (), (), (),
+        )
+        bad_sizes = ((0,), (), (), ())  # length 1, mismatch
+        with pytest.raises(ValueError, match="round_history|round_bet_sizes"):
+            _root_state(round_history=bad_hist, round_bet_sizes=bad_sizes)
+
+    def test_round_bet_sizes_non_negative(self) -> None:
+        bad_sizes = ((0, -1), (), (), ())
+        bad_hist = ((HUNLAction.BET, HUNLAction.BET), (), (), ())
+        with pytest.raises(ValueError, match="round_bet_sizes"):
+            _root_state(
+                round_history=bad_hist, round_bet_sizes=bad_sizes,
+                stack_p0=STARTING_STACK_CHIPS,
+                stack_p1=STARTING_STACK_CHIPS,
+                pot=0,
+            )
+
+    def test_null_padding_rejected_inside_round_history(self) -> None:
+        """NULL_PADDING is encode-time only — never inside round_history."""
+        bad_hist = ((HUNLAction.NULL_PADDING,), (), (), ())
+        bad_sizes = ((0,), (), (), ())
+        with pytest.raises(ValueError, match="NULL_PADDING"):
+            _root_state(round_history=bad_hist, round_bet_sizes=bad_sizes)
+
+    def test_future_rounds_must_be_empty(self) -> None:
+        """current_round=0 means rounds 1/2/3 must have empty history."""
+        bad_hist = ((), (HUNLAction.CALL,), (), ())
+        bad_sizes = ((), (0,), (), ())
+        with pytest.raises(ValueError, match="future round"):
+            _root_state(
+                current_round=0,
+                round_history=bad_hist,
+                round_bet_sizes=bad_sizes,
+            )
 
     def test_current_round_in_range(self) -> None:
         with pytest.raises(ValueError, match="current_round"):
