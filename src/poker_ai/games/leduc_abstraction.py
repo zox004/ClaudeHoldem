@@ -171,6 +171,11 @@ class AbstractedLeducPoker:
     def all_deals(self) -> tuple[tuple[int, int, int], ...]:
         return self._raw.all_deals()
 
+    def sample_deal(self, rng: np.random.Generator) -> tuple[int, int, int]:
+        """Delegates to the raw Leduc sampler — abstraction does not
+        affect chance distribution."""
+        return self._raw.sample_deal(rng)
+
     def state_from_deal(self, deal: tuple[int, int, int]) -> AbstractedLeducState:
         return AbstractedLeducState(
             _raw=self._raw.state_from_deal(deal),

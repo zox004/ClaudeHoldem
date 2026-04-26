@@ -79,16 +79,20 @@ class MCCFRExternalSampling:
         """Each iteration: alternating-player traversal from a single sampled deal.
 
         For each updating player p:
-          1. Sample chance (one deal)
+          1. Sample chance (one deal) via :meth:`GameProtocol.sample_deal`
           2. Traverse with external sampling of non-updating player actions
           3. Regret/strategy updated at p's infosets via the recursion
+
+        Phase 4 Step 3 (M0): switched from ``all_deals``-then-uniform-pick
+        to direct ``sample_deal`` so HUNL (where ``all_deals`` is
+        impractical to enumerate) plugs in unchanged. Behaviour on Kuhn /
+        Leduc / abstracted Leduc is preserved exactly — those games'
+        ``sample_deal`` is implemented as ``rng.choice(self.all_deals())``,
+        the same distribution this loop used before.
         """
-        deals = self.game.all_deals()
-        n_deals = len(deals)
         for _ in range(iterations):
             for updating_player in (0, 1):
-                deal_idx = int(self.rng.integers(0, n_deals))
-                deal = deals[deal_idx]
+                deal = self.game.sample_deal(self.rng)
                 root = self.game.state_from_deal(deal)
                 self._traverse(
                     root,

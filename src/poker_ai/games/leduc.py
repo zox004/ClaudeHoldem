@@ -246,6 +246,15 @@ class LeducPoker:
         return tuple(permutations(range(6), 3))
 
     @staticmethod
+    def sample_deal(rng: np.random.Generator) -> tuple[int, int, int]:
+        """Uniform sample over the 120 finite deals — Phase 4 Step 3 (M0)
+        addition for GameProtocol scaling. Same uniform distribution as
+        :meth:`all_deals`-based enumeration."""
+        deals = LeducPoker.all_deals()
+        idx = int(rng.integers(0, len(deals)))
+        return deals[idx]
+
+    @staticmethod
     def state_from_deal(deal: tuple[int, int, int]) -> LeducState:
         """Build the round-1 root state from a ``(P1, P2, board)`` deal triple.
 

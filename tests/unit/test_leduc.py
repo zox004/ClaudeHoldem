@@ -137,6 +137,33 @@ class TestAllDeals:
         deals = LeducPoker.all_deals()
         assert len(set(deals)) == 120
 
+
+# -----------------------------------------------------------------------------
+# LeducPoker.sample_deal — Phase 4 Step 3 (M0) GameProtocol scaling
+# -----------------------------------------------------------------------------
+class TestSampleDeal:
+    def test_returns_deal_in_all_deals(self) -> None:
+        rng = np.random.default_rng(42)
+        deal = LeducPoker.sample_deal(rng)
+        assert deal in LeducPoker.all_deals()
+
+    def test_seed_reproducibility(self) -> None:
+        rng_a = np.random.default_rng(42)
+        rng_b = np.random.default_rng(42)
+        seq_a = [LeducPoker.sample_deal(rng_a) for _ in range(50)]
+        seq_b = [LeducPoker.sample_deal(rng_b) for _ in range(50)]
+        assert seq_a == seq_b
+
+    def test_uniform_distribution_120k_samples(self) -> None:
+        """All 120 deals should appear with roughly 1/120 frequency."""
+        from collections import Counter
+        rng = np.random.default_rng(42)
+        cnt = Counter(LeducPoker.sample_deal(rng) for _ in range(120_000))
+        assert len(cnt) == 120
+        # Tolerance: ±15% on 1k expected (uniform sampling spread).
+        for c in cnt.values():
+            assert 800 < c < 1200
+
     @pytest.mark.parametrize(
         "pair_category,expected_count",
         [

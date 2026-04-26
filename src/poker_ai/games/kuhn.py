@@ -125,6 +125,14 @@ class KuhnPoker:
         return KuhnPoker._DEALS
 
     @staticmethod
+    def sample_deal(rng: np.random.Generator) -> tuple[int, int]:
+        """Uniform sample over the 6 finite deals — Phase 4 Step 3 (M0)
+        addition for GameProtocol scaling. Same uniform distribution that
+        :meth:`all_deals`-based code already implies."""
+        idx = int(rng.integers(0, len(KuhnPoker._DEALS)))
+        return KuhnPoker._DEALS[idx]
+
+    @staticmethod
     def state_from_deal(deal: tuple[int, int]) -> KuhnState:
         return KuhnState(deal=deal, history=())
 

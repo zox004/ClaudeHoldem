@@ -62,12 +62,25 @@ class GameProtocol(Protocol):
     tabular CFR and neural function-approximating Deep CFR: the advantage
     and strategy networks consume a fixed-dim numeric vector per infoset,
     which :meth:`encode` produces from any non-terminal state.
+
+    ``sample_deal`` was added in Phase 4 Step 3 (M0) to support games
+    where ``all_deals()`` is impractical to enumerate (HUNL has ~10^14
+    deals). Algorithms that scale via Monte Carlo sampling (External-
+    Sampling MCCFR, Deep CFR's outer loop) should use ``sample_deal``;
+    enumeration-based algorithms (Vanilla CFR, exact best-response /
+    exploitability) keep using ``all_deals``. Finite-deal games (Kuhn,
+    Leduc, AbstractedLeducPoker) implement both — ``sample_deal`` simply
+    picks uniformly from ``all_deals``. Large-deal games (HUNL) raise
+    ``NotImplementedError`` from ``all_deals`` and provide a direct
+    sampler in ``sample_deal``.
     """
 
     NUM_ACTIONS: int
     ENCODING_DIM: int
 
     def all_deals(self) -> tuple[Any, ...]: ...
+
+    def sample_deal(self, rng: np.random.Generator) -> Any: ...
 
     def state_from_deal(self, deal: Any) -> StateProtocol: ...
 

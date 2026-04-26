@@ -91,6 +91,36 @@ class TestAllDeals:
 
 
 # -----------------------------------------------------------------------------
+# KuhnPoker.sample_deal — Phase 4 Step 3 (M0) GameProtocol scaling
+# -----------------------------------------------------------------------------
+class TestSampleDeal:
+    def test_returns_deal_in_all_deals(self) -> None:
+        import numpy as np
+        rng = np.random.default_rng(42)
+        deal = KuhnPoker.sample_deal(rng)
+        assert deal in KuhnPoker.all_deals()
+
+    def test_seed_reproducibility(self) -> None:
+        import numpy as np
+        rng_a = np.random.default_rng(42)
+        rng_b = np.random.default_rng(42)
+        seq_a = [KuhnPoker.sample_deal(rng_a) for _ in range(20)]
+        seq_b = [KuhnPoker.sample_deal(rng_b) for _ in range(20)]
+        assert seq_a == seq_b
+
+    def test_uniform_distribution_60k_samples(self) -> None:
+        """All 6 deals should appear with roughly 1/6 frequency."""
+        import numpy as np
+        from collections import Counter
+        rng = np.random.default_rng(42)
+        cnt = Counter(KuhnPoker.sample_deal(rng) for _ in range(60_000))
+        assert len(cnt) == 6
+        # Tolerance: ±1% on 10k expected.
+        for c in cnt.values():
+            assert abs(c - 10_000) < 200
+
+
+# -----------------------------------------------------------------------------
 # current_player
 # -----------------------------------------------------------------------------
 class TestCurrentPlayer:

@@ -208,6 +208,14 @@ class TestAbstractedLeducPoker:
         game = AbstractedLeducPoker(n_buckets=2)
         assert game.n_infosets() == 192
 
+    def test_sample_deal_delegates_to_raw(self) -> None:
+        """Phase 4 Step 3 (M0) — abstracted game's sample_deal delegates
+        to the raw Leduc sampler (abstraction does not affect chance)."""
+        game = AbstractedLeducPoker(n_buckets=2)
+        rng = np.random.default_rng(42)
+        deal = game.sample_deal(rng)
+        assert deal in game.all_deals()
+
 
 # =============================================================================
 # Round-trip — full traversal works end-to-end on the wrapper
