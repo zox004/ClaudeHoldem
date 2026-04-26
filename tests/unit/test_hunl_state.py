@@ -80,7 +80,7 @@ def _root_state(
     current_player: int = 0,
     stack_p0: int = STARTING_STACK_CHIPS,
     stack_p1: int = STARTING_STACK_CHIPS,
-    last_bet_size: int = 0,
+    last_raise_increment: int = 0,
     pot: int = 0,
     round_history: tuple[
         tuple[HUNLAction, ...], tuple[HUNLAction, ...],
@@ -101,7 +101,7 @@ def _root_state(
         current_player=current_player,
         stack_p0=stack_p0,
         stack_p1=stack_p1,
-        last_bet_size=last_bet_size,
+        last_raise_increment=last_raise_increment,
         pot=pot,
     )
 
