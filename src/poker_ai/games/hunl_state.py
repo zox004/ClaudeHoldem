@@ -53,6 +53,8 @@ from typing import Final
 
 import numpy as np
 
+from poker_ai.games.hunl_hand_eval import compare_hands
+
 
 class HUNLAction(IntEnum):
     """Raw HUNL action label.
@@ -616,6 +618,92 @@ class HUNLState:
             last_raise_increment=next_last_raise,
             pot=new_pot,
         )
+
+    # ============================================================== M1.4
+    # Terminal utility: hand-resolution at hands that have already
+    # reached :prop:`is_terminal`. Mirrors Phase 2 LeducPoker's static
+    # method API; ``HUNLGame.terminal_utility(state)`` (M1.5) will
+    # delegate to this.
+
+    def _total_contributions(self) -> tuple[int, int]:
+        """Total chips each player committed across all rounds.
+
+        Round 0 always contributes blinds (P0=BB=2, P1=SB=1) even if
+        the round has no actions yet (which can only happen at the
+        non-terminal root). Round r ≥ 1 contributes only if it has
+        actions.
+        """
+        total_p0 = 0
+        total_p1 = 0
+        for r in range(NUM_ROUNDS):
+            if r > 0 and not self.round_history[r]:
+                continue
+            cp0, cp1 = self._round_contributions(r)
+            total_p0 += cp0
+            total_p1 += cp1
+        return total_p0, total_p1
+
+    def _find_folder(self) -> int | None:
+        """Returns the player who folded (0 or 1), or ``None`` if no
+        fold occurred (river-close terminal)."""
+        for r in range(NUM_ROUNDS):
+            actions = self.round_history[r]
+            if actions and actions[-1] == HUNLAction.FOLD:
+                # Walk to determine who folded.
+                actor = first_actor_for_round(r)
+                for _ in actions[:-1]:
+                    actor = 1 - actor
+                return actor
+        return None
+
+    def terminal_utility(self) -> float:
+        """Player 0's chip-net change at terminal (positive ⇒ P0 won
+        chips). Heads-up zero-sum: P1's utility is the negation.
+
+        Three resolution paths:
+
+        1. **Fold**: the non-folding player wins the matched pot. The
+           folder loses ``matched`` chips; the winner gains ``matched``.
+           Any uncalled excess (the winner's contribution beyond
+           ``matched``) is conceptually returned to the winner — the
+           formula collapses to a single ``±matched`` because both
+           players' chip changes are exactly ``matched`` in opposite
+           directions.
+
+        2. **Showdown win**: hand_eval picks the winner via
+           :func:`compare_hands` on the river board + each player's
+           hole cards; winner gains ``matched``, loser loses ``matched``.
+
+        3. **Tie (split pot)**: equal hand strength → 0 chip net
+           change for either player. Pot is split, both contribute
+           and recover ``matched``.
+
+        Raises ``ValueError`` if called on a non-terminal state.
+        """
+        if not self.is_terminal:
+            raise ValueError(
+                "terminal_utility called on non-terminal state"
+            )
+
+        total_p0, total_p1 = self._total_contributions()
+        matched = min(total_p0, total_p1)
+
+        folder = self._find_folder()
+        if folder is not None:
+            return -float(matched) if folder == 0 else +float(matched)
+
+        # Showdown — board must be the full 5-card river by now since
+        # is_terminal returned True via the river-close path.
+        sign = compare_hands(
+            list(self.private_cards[0:2]),
+            list(self.private_cards[2:4]),
+            list(self.board_cards),
+        )
+        if sign == +1:
+            return +float(matched)
+        if sign == -1:
+            return -float(matched)
+        return 0.0   # tie split
 
     @staticmethod
     def _replay_round_contributions(
