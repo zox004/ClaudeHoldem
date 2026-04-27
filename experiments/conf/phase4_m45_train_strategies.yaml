@@ -1,0 +1,44 @@
+# @package _global_
+# Phase 4 M4.5.0 — Strategy persist infrastructure.
+#
+# 5 seed × MCCFR ExternalSampling T=100k cumulative train, pickle dump
+# only. No LBR / occupancy / plot — those live in M3.4 baseline.
+# Production game config matches M3.4 / M4.0 baseline 1:1
+# (n_buckets=50, n_trials=10000, postflop_mc_trials=300,
+# postflop_threshold_sample_size=10000).
+#
+# Wall-clock estimate (parallel 5-seed): ~30-60min based on M3.4
+# baseline (361min total) minus per-anchor LBR (n_samples=2000 paired,
+# the dominant cost). First-run actual reported in PHASE.md.
+#
+# Overrides:
+#   uv run python -m experiments.phase4_m45_train_strategies                     # full
+#   uv run python -m experiments.phase4_m45_train_strategies T=1000              # smoke
+#   uv run python -m experiments.phase4_m45_train_strategies parallel=false      # sequential
+#   uv run python -m experiments.phase4_m45_train_strategies seeds=[42]          # single
+
+experiment_name: phase4_m45_train_strategies
+
+# Game configuration (production-default; matches M3.4 / M4.0 baseline).
+n_buckets: 50
+n_trials: 10000                       # preflop HUNLCardAbstractor MC trials
+postflop_mc_trials: 300                # PostflopBoardAbstractor MC trials
+postflop_threshold_sample_size: 10000  # PostflopBoardAbstractor threshold pairs
+
+# MCCFR.
+n_actions: 6                          # AbstractedHUNLAction grid
+epsilon: 0.05                         # ε-exploration (Lanctot §3.2)
+T: 100000                             # MCCFR iterations per seed
+
+# Seeds (M3.4 baseline 1:1 for downstream comparability).
+seeds: [42, 123, 456, 789, 1024]
+parallel: true                        # multiprocessing.Pool 5 worker
+
+hydra:
+  run:
+    dir: experiments/outputs/${experiment_name}/${now:%Y%m%d-%H%M%S}
+  sweep:
+    dir: experiments/outputs/${experiment_name}/multirun/${now:%Y%m%d-%H%M%S}
+    subdir: ${hydra.job.num}
+  job:
+    chdir: false

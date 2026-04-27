@@ -5,14 +5,13 @@
 
 ## 현재 상태
 
-**Phase**: **Phase 4 M4.4 closure (2026-04-27 evening)** — Slumbot live pilot (30-hand uniform) + 3 self-audit instances + 자산 #24 candidate 정식 등록.
-**완료**: M0/M1/M2 + M3.1-M3.4 (postflop bucketing + 6-action grid + LBR + baseline) + M4.0 stack 200 BB + M4.1-M4.4 (transport + protocol + harness + live pilot). **762 unit GREEN + 2 live integration tests PASS** (default skip), ruff/mypy clean (28 src files).
-**다음 (M4.5)**: Production 10k+ hand vs Slumbot. **클코 권고**: M4.5 진입 전 (i) 채택 유지 vs (ii) Schnizlein 2009 도입 결정 — pilot에서 17% replay divergence 확인 (자산 #24 정식 등록).
-**Self-audit**: 클코 25 / 멘토 10 (M4.4 mentor #10 client_pos doc drift, claude #24 anonymous body, claude #25 token Optional). Mentor solo 발견 0/10 일관.
-**M4.4 pilot**: 30 hand vs slumbot.com, 25 success / 5 replay-divergence failure, position alternation 12/13, sync_check 20/25, 1.81s/hand, no rate limit at 1s pacing. Mean winrate -3100 mbb/hand (uniform vs Slumbot — strong opponent baseline).
-**자산 카탈로그**: 23 → 24 (자산 #24 Schnizlein 2009 probabilistic state translation, Phase 5 abstraction precision cluster).
+**Phase**: **Phase 4 M4.5.0 partial — strategy persist infra + first attempt 2/5 success (2026-04-28 새벽)**. Train+dump script + TDD test (9/9 GREEN) committed. 5-seed parallel run: 2 pickle (seed42, seed123) ~1.1GB STOP-opcode validated, 3 (seed456, 789, 1024) truncated by premature kill.
+**완료**: M0/M1/M2 + M3.1-M3.4 + M4.0-M4.4 + **M4.5.0 infra (script + 9 unit tests)**. **771 unit GREEN** (762 + 9 신규), ruff/mypy clean (28 src files).
+**다음 (M4.5.0 retry)**: 3 truncated seed (456, 789, 1024) re-train. **이슈 분석**: 동시 5-worker × 1.1GB pickle.dump → swap 압박 → dump 30~60min/worker. fastest worker (seed42) 3h 28m, kill 시점 (00:48) parent read-stuck = "hang"이 아니라 단순히 잔여 worker dump 진행 중이었다는 사실이 ls-stable 5초 snapshot으로 잘못 판단. 해결 옵션: (α) atomic rename + fcntl lock으로 dump 직렬화, (β) sequential worker로 메모리 압박 제거 (~20h), (γ) pickle 대신 npz/sqlite. 사용자 결정 대기.
+**Self-audit**: 클코 25 / 멘토 10 (변화 없음). M4.5.0 first-attempt premature-kill은 **자산 #22 cross-context-transfer 5번째 instance 후보** — "ls 5초 stable = process idle"이라는 직관 (다른 컨텍스트의 정답)을 spawn-pool dump-in-progress 컨텍스트로 verification 없이 transfer.
+**자산 카탈로그**: 24 (변동 없음). M4.5.0 retry 후 spawn-pool dump-serialization 패턴이 일반 패턴이면 자산 #25 후보 (large-artifact dump under spawn-pool memory pressure).
 **운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘/fact 영역 클코 의견 먼저. 자가 교정 문구 클코 작성.
-**테스트**: 762 unit + 7 HUNL integration + 2 live (default skip) GREEN.
+**테스트**: 771 unit + 7 HUNL integration + 2 live (default skip) GREEN.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -36,6 +35,104 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 4 M4.5.0 — Strategy persist infra + 1st-attempt 2/5 success (2026-04-28 새벽)
+
+> 신규 mini script `experiments/phase4_m45_train_strategies.py` + Hydra
+> config + TDD 9 unit tests. M3.4/M4.0 baseline은 `trainer.average_strategy()`를
+> LBR/occupancy 즉시 소비, disk dump 없음 → M4.5.1 mini-pilot 진입을 위해
+> persist infra 별도 추가.
+
+#### Pickle artifact contract (frozen)
+
+```python
+{
+  "seed": int,
+  "T": int,                        # MCCFR iterations
+  "game_config": {
+    "n_buckets": 50, "n_trials": 10000,
+    "postflop_mc_trials": 300,
+    "postflop_threshold_sample_size": 10000,
+    "n_actions": 6, "epsilon": 0.05,
+    "starting_stack_bb": 200,      # MUST equal STARTING_STACK_BB
+  },
+  "strategy": dict[str, np.ndarray],
+  "n_infosets_by_round": {0,1,2,3 → int},
+}
+```
+
+`dump_strategy(...)`가 `starting_stack_bb != 200`이면 `ValueError` raise — M4.0 mentor #9 (100 BB ↔ 200 BB doc-drift) 사실 artifact-level lock-in.
+
+#### TDD 순서 (사용자 confirm 후)
+
+1. FAILING test (`tests/unit/test_phase4_m45_strategy_persist.py`) — RED 확인 (`ModuleNotFoundError`)
+2. Script + helper (`count_infosets_by_round`, `dump_strategy`, `load_strategy`) 구현
+3. **9/9 GREEN** (round-trip dtype/shape/key, schema 5-key 강제, stack lock-in pass+rejection)
+4. Ruff + mypy (28 src files clean; experiments/ baseline pattern 동일 mypy noise 허용)
+
+#### 1st attempt 5-seed parallel run (시작 20:12:22, kill 00:48)
+
+| seed | pkl close | size | STOP opcode | n_infosets total |
+|------|-----------|------|-------------|-----------------:|
+| 42   | 23:40 (3h 28m) | 1044 MB | ✓ `0x2e` | **8,906,995** |
+| 123  | 00:19 (4h 7m)  | 1125 MB | ✓ `0x2e` | **9,575,729** |
+| 456  | 00:32 timestamp | 1125 MB | ✗ `0x94` truncated | n/a |
+| 789  | 00:36 timestamp | 1086 MB | ✗ `0x94` truncated | n/a |
+| 1024 | 00:35 timestamp | 1139 MB | ✗ `0x94` truncated | n/a |
+
+#### 2-seed partial audit
+
+| Round | seed42 | seed123 | spread (max-min)/mean | flag |
+|-------|-------:|--------:|----------------------:|------|
+| preflop | 1,829 | 1,842 | 0.71% | — |
+| flop    | 419,828 | 424,827 | 1.18% | — |
+| turn    | 2,025,120 | 2,110,330 | 4.12% | — |
+| river   | 6,460,218 | 7,038,730 | **8.57%** | WARN >5% |
+
+River >5% spread는 MCCFR external sampling stochasticity로 정상 변이
+범위 (n=2 통계적 신뢰 낮음, 5-seed re-train 후 재판정).
+
+#### Premature-kill 분석 — 자산 #22 5번째 instance 후보
+
+`ls -la *.pkl` 5초 간격 size stable 관측 → "process idle" 결론
+→ parent의 read-syscall stuck을 hang으로 해석 → kill. 실제는 잔여
+3 worker가 각 1.1+GB pickle.dump 진행 중이었고 (최빠른 worker가
+3h 28m 걸렸으니 가장 느린 worker는 ~5h+ 추정), `pickle.dump`의
+chunk-write gap이 우연히 5초 간격 sample에 걸린 것. spawn pool +
+대용량 dump 컨텍스트로 "ls stable = idle" 직관 transfer 시
+verification 누락 — 자산 #22 패턴 (cross-context fact transfer
+without verification) 5번째 instance 후보.
+
+| # | Phase | Type |
+|---|---|---|
+| Phase 3 #1 | Phase 3 Day 5 | algorithm transfer |
+| M3.3 #8 | Phase 4 M3.3 | use case transfer |
+| M4.0 #9 | Phase 4 M4.0 | fact (stack depth) transfer |
+| M4.4 #10 | Phase 4 M4.4 | fact (API client_pos) transfer |
+| **M4.5.0 candidate** | Phase 4 M4.5.0 | **process-state heuristic transfer** |
+
+#### Root cause 가설 + retry 옵션
+
+**가설**: 16GB unified memory에서 5 worker × 1.1GB pickle (각 worker
+peak ~3-4GB 합 15-20GB) → swap 압박 → `pickle.dump`가 disk-bound로
+30~60min/worker. M3.4 baseline 361min은 cumulative train + LBR n=2000
+paired 비중인 반면 M4.5.0은 dump가 dominant cost.
+
+**Retry 옵션** (사용자 결정 대기):
+- (α) script에 `fcntl.flock` 도입 → worker dump 직렬화. 대략 wall-clock 5h 유지
+- (β) `parallel=false` sequential 5-seed (~20h, 메모리 압박 0)
+- (γ) pickle 대신 `np.savez_compressed` + JSON metadata (size 30-50% 감축, dump 더 빠를 가능성)
+- (δ) 3 missing seed만 single-seed 순차 train (~12-15h)
+
+#### M4.5 sub-step 재정의 (M4.5.0 partial 기준)
+
+- M4.5.0a — **(NEXT)** retry 옵션 결정 + 3 missing seed re-train → 5/5 valid pickle
+- M4.5.0b — full 5-seed audit (n_infosets spread, starting_stack_bb lock-in PASS)
+- M4.5.1 — 1k mini-pilot 5-seed parallel vs Slumbot
+- M4.5.2 — divergence threshold 분류 → (i) maintain or (ii) Schnizlein 결정
+- M4.5.3+ — production run (path A or B)
+
+---
 
 ### Phase 4 M4.4 — Slumbot live pilot + 3 self-audit instances (2026-04-27 evening)
 
