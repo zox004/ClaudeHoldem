@@ -5,13 +5,14 @@
 
 ## 현재 상태
 
-**Phase**: **Phase 4 M4.0 closure (2026-04-27 16:08)** — Stack 200 BB Slumbot/ACPC standard + baseline 재training + Scenario B 분류.
-**완료**: M0 GameProtocol scaling, M1 HUNL game engine, M2 Pluribus path validation, M3.1-M3.4 (postflop bucketing + 6-action grid + LBR + first baseline), **M4.0 stack 100→200 BB + 재training (Scenario B: ratio 3.24×, target ≥3× PASS)**. 669 unit + 7 HUNL integration GREEN, ruff src clean, mypy strict clean (25 source files).
-**다음 (M4.1)**: Slumbot HTTP client + ACPC API 어댑터. 200 BB 호환 + 자산 #22 (cross-context transfer verification) hook 적용.
-**Self-audit**: 클코 23 / 멘토 9 (M4.0 mentor #9: 100 BB cash convention → ACPC 200 BB Doyle's Game fact transfer 누락).
-**M4.0 baseline**: T=1k→T=100k LBR **3.24×** 감소 (200 BB), per-seed 100% monotone, healthy abstraction. 100 BB의 2.35× 부족이 stack-depth dependent natural trajectory 영향 — abstraction floor가 아닌 (b) MCCFR budget mechanism 우세 입증.
-**운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘/fact 영역 클코 의견 먼저. 자가 교정 문구 클코 작성. M4.0 후 자산 #22 일반화: "Cross-context transfer requires verification" (algorithm/use-case/fact 3 layer).
-**테스트**: unit 669 + integration 7 GREEN.
+**Phase**: **Phase 4 M4.4 closure (2026-04-27 evening)** — Slumbot live pilot (30-hand uniform) + 3 self-audit instances + 자산 #24 candidate 정식 등록.
+**완료**: M0/M1/M2 + M3.1-M3.4 (postflop bucketing + 6-action grid + LBR + baseline) + M4.0 stack 200 BB + M4.1-M4.4 (transport + protocol + harness + live pilot). **762 unit GREEN + 2 live integration tests PASS** (default skip), ruff/mypy clean (28 src files).
+**다음 (M4.5)**: Production 10k+ hand vs Slumbot. **클코 권고**: M4.5 진입 전 (i) 채택 유지 vs (ii) Schnizlein 2009 도입 결정 — pilot에서 17% replay divergence 확인 (자산 #24 정식 등록).
+**Self-audit**: 클코 25 / 멘토 10 (M4.4 mentor #10 client_pos doc drift, claude #24 anonymous body, claude #25 token Optional). Mentor solo 발견 0/10 일관.
+**M4.4 pilot**: 30 hand vs slumbot.com, 25 success / 5 replay-divergence failure, position alternation 12/13, sync_check 20/25, 1.81s/hand, no rate limit at 1s pacing. Mean winrate -3100 mbb/hand (uniform vs Slumbot — strong opponent baseline).
+**자산 카탈로그**: 23 → 24 (자산 #24 Schnizlein 2009 probabilistic state translation, Phase 5 abstraction precision cluster).
+**운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘/fact 영역 클코 의견 먼저. 자가 교정 문구 클코 작성.
+**테스트**: 762 unit + 7 HUNL integration + 2 live (default skip) GREEN.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -35,6 +36,163 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 4 M4.4 — Slumbot live pilot + 3 self-audit instances (2026-04-27 evening)
+
+> 30-hand uniform-strategy pilot vs slumbot.com. Goal: infrastructure
+> validation, not winrate measurement. **3 self-audit findings (1
+> mentor + 2 claude) only catchable via live HTTP** + 1 known
+> limitation (M4.2 nearest-bucket dispatch divergence) registered as
+> Phase 5 hook (asset #24 candidate confirmed for production).
+
+#### Pilot setup
+
+`experiments/phase4_m44_slumbot_pilot.py` + Hydra config (n_buckets=50,
+n_trials=10000, postflop_mc_trials=300, postflop_threshold_sample_size=
+10000, hand_sleep_s=1.0). Uniform strategy (6-element, harness applies
+legal mask). Per-hand try/except + structured logging (Hook 3 design).
+
+#### Pilot results (30-hand uniform vs slumbot.com)
+
+| Metric | Value |
+|---|---|
+| n_success / n_failure | **25 / 5** (~17% replay-divergence rate) |
+| Avg wall-clock per hand | 1.81 s |
+| client_pos 0 / 1 (Hook 1) | 12 / 13 — alternation ✓ |
+| sync_check pass / false (Hook 2) | 20 / 5 (all 5 mismatches on fold paths) |
+| Token rotations seen | 0 (server omits or reuses) |
+| Mean winrate (mbb/hand) | -3100 (uniform vs Slumbot — strong opponent) |
+| Failure kinds | 5 × ValueError (M4.2 nearest-bucket replay divergence) |
+
+Position alternation, retry policy (no 5xx/429 triggered in 30 hands),
+token refresh paths all exercised live without crashes (modulo the
+known M4.2 limitation).
+
+#### mentor #10 self-correction (live verify, M4.4 entry)
+
+**오류**: M4.1 Slumbot HTTP client implementation에서 채택한 `client_pos`
+매핑 — `client_pos == 0 → client is SB / button` (per third-party
+`Gongsta/Poker-AI/slumbot/slumbot_api.py` doc 및 web fetch). 우리
+implementation: `our_player_idx = 1 if client_pos == 0 else 0`
+(client SB → HUNLState player 1).
+
+**본질**: 사실과 반대. Live verification (M4.4 first hand,
+2026-04-27): `new_hand` response with `client_pos == 0` consistently
+returns `action` strings starting with SB-side moves (e.g. ``"b200"``
+or ``"f"``). The only consistent reading is that the *server* takes
+the SB/button position and `client_pos` reports the *client's role*
+— ``client_pos == 0`` means **client is BB**, ``client_pos == 1``
+means client is SB. Direct mapping to HUNLState (player 0 = BB,
+player 1 = SB): ``our_player_idx = client_pos``.
+
+**오류 패턴 4번째 instance** (자산 #22 일반화 일관):
+
+| # | Phase | Type |
+|---|---|---|
+| Phase 3 #1 | Phase 3 Day 5 | algorithm transfer |
+| M3.3 #8 | Phase 4 M3.3 | use case transfer |
+| M4.0 #9 | Phase 4 M4.0 | fact (stack depth) transfer |
+| **M4.4 #10** | Phase 4 M4.4 | **fact (API client_pos) transfer — doc drift** |
+
+**발견**: 클코 live HTTP smoke (anonymous + 1 hand uniform) 실패 시
+state-side desync 추적 → server "b200" + client_pos=0 evidence
+collected. Doc-drift 가능성 surface — third-party docs may have not
+been updated against current Slumbot server. **mentor 단독 발견 0/10
+일관**.
+
+**reframe**: `our_player_idx = client_pos` direct mapping; deal
+reconstruction inverted (client_pos=0 → BB at slots 0..1, =1 → SB at
+slots 2..3). Unit test fixtures swapped (0 ↔ 1) to align — full
+M4.3 unit suite re-greens under new convention.
+
+**mentor 누계 9 → 10**.
+
+#### claude #24 self-audit (live verify, M4.4 entry)
+
+`/api/new_hand` request body. M4.1 implementation: `{"token": <token
+or None>}` always. Slumbot live server: 400 Client Error on
+``{"token": null}`` (`"Object type exception: Expected string"`).
+Anonymous play requires the field to be **omitted entirely** (`{}`).
+
+mock test ``test_anonymous_first_call_sends_null_or_empty_token``
+allowed both forms (web fetch had said "either accepted") — false
+positive. live verify catches.
+
+**Fix**: ``new_hand`` body now elides ``token`` when ``self._token is
+None``: ``body = {}; if self._token is not None: body["token"] =
+self._token``.
+
+#### claude #25 self-audit (live verify, M4.4 mid-pilot)
+
+``SlumbotResponse.token`` was typed ``str`` (required). Slumbot live
+``/api/act`` responses often **omit** the ``token`` field on
+mid-hand updates that don't rotate the session. M4.1 ``_parse_response``
+crashed with ``KeyError: 'token'`` on the second hand's first ``act``
+response.
+
+**Fix**: ``SlumbotResponse.token: str | None`` (Optional);
+``_parse_response`` uses ``body.get("token")``; ``SlumbotClient._post``
+only refreshes ``self._token`` when the new response provides a value
+(``if parsed.token is not None: self._token = parsed.token``).
+
+#### Asset #24 candidate confirmed — Schnizlein 2009 probabilistic state translation
+
+M4.2 spec lock chose (i) nearest-bucket over (ii) Schnizlein 2009 with
+the rationale "M4 measurement-only, (i) bias measurable". Live pilot
+confirmed: **5 of 30 hands (~17%) failed at replay due to opponent
+raw-size divergence** (e.g., `b200c/kb200b19700b19800` chain where
+abstracted-bucket replay diverges from server's raw chip
+accounting → BET illegal at next ingest).
+
+This *is* the silent bias the M4.2 push-back accepted. M4.5
+production at 10k hands with trained strategy will show:
+- Nominal failure rate (~17% expected, may be higher with trained
+  strategy that *follows* opponent raise patterns more)
+- The biased winrate measurement under (i) is a valid lower-bound on
+  the true winrate (failures are unrecoverable hands, but successful
+  hands still produce valid record)
+
+**자산 #24 candidate 정식 등록** (자산 카탈로그 23 → 24): Schnizlein
+2009 probabilistic state translation. Phase 5 abstraction precision
+cluster (distribution-aware K-means + EMD + Schnizlein) urgency ↑
+based on pilot evidence.
+
+#### Audit log update
+
+| # | 발견 | Commit |
+|---|---|---|
+| **mentor #10** | `client_pos` doc drift (Slumbot live: 0=BB; doc said 0=SB) | M4.4 entry, slumbot_harness.py mapping fix |
+| **claude #24** | `{"token": null}` body rejected by server; `{}` only accepted | M4.4 entry, slumbot_client.py new_hand fix |
+| **claude #25** | `/api/act` response often omits `token` field | M4.4 mid-pilot, slumbot_client.py Optional |
+
+**누계: claude 25 / mentor 10.** (Mentor solo discovery rate 0/10
+지속, 운영 변경 정당성 강화.)
+
+#### M4.5 entry implications
+
+- ✓ Transport stack OK (no 5xx/429 in 30 hands at 1s pacing → reduce to 0.5s for M4.5)
+- ✓ Position alternation works as designed (Hook 1)
+- ⚠ Replay divergence is real — M4.5 production winrate will be measured on a *subset* of attempted hands (success rate ~83% expected)
+- ⚠ sync_check magnitude mismatches on fold paths point to bucket-level chip-flow accounting differences; informational only
+- 🔧 (i) → (ii) Schnizlein hook now urgent for Phase 5 (was "deferred"); M4.5 winrate is a lower bound on true winrate
+
+#### Phase 4 ETA reality check (M4.4 closure)
+
+| M | 원래 | M4.4 closure 시점 |
+|---|---|---|
+| M4.0 stack reconfigure | n/a | 1 commit + 1 baseline rerun |
+| M4.1 transport | 1주 | 1 commit |
+| M4.2 protocol adapter | 1주 | 1 commit |
+| M4.3 harness | 1주 | 1 commit |
+| **M4.4 live pilot** | 1주 | **1 commit + 30-hand pilot run** |
+| M4.5 production (10k hand) | 2주 | TBD (Schnizlein hook 결정 영향) |
+| M4.6 closure + Phase 4 종료 | 1주 | TBD |
+
+**M4 본질적 work (M4.0-M4.4)**: 5주 → **5 세션 + 1 baseline rerun + 1
+pilot run**. M4.5 production 진입 전 클코 권고 — Schnizlein 2009 (ii)
+Phase 5 hook 도입 *전* M4.5 진입 vs *후* 진입의 trade-off 검토 필요.
+
+---
 
 ### Phase 4 M4.0 — Stack 100 BB → 200 BB Slumbot/ACPC standard (mentor #9, 2026-04-27)
 

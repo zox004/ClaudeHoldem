@@ -1,0 +1,44 @@
+# @package _global_
+# Phase 4 M4.4 — Slumbot live pilot (infrastructure validation).
+#
+# 30-hand smoke run against slumbot.com using uniform strategy.
+# Goal: validate M4.1 transport + M4.2 protocol + M4.3 harness
+# integration end-to-end. Detects (Hook 1) rate limits, (Hook 2)
+# token rotation patterns, (Hook 3) unexpected sequence patterns
+# that mock fixtures didn't anticipate.
+#
+# Trained-strategy run is M4.5 production scope (claude push-back
+# accepted: M4.4 = infra only, M4.5 = strategy validation + winrate).
+#
+# Overrides:
+#   uv run python -m experiments.phase4_m44_slumbot_pilot
+#   uv run python -m experiments.phase4_m44_slumbot_pilot n_hands=5  # micro-smoke
+#   uv run python -m experiments.phase4_m44_slumbot_pilot hand_sleep_s=2.0
+
+experiment_name: phase4_m44_slumbot_pilot
+
+# Run scope (claude's conservative default; mentor spec was 60).
+n_hands: 30
+seed: 42
+
+# Conservative inter-hand pacing (Hook 1 — rate-limit conservatism).
+# 1s default; bump to 2-5s if Slumbot throttles us.
+hand_sleep_s: 1.0
+
+# Game configuration (production-scale; matches M4.0 baseline).
+n_buckets: 50
+n_trials: 10000
+postflop_mc_trials: 300
+postflop_threshold_sample_size: 10000
+
+# Retry policy (M4.3 default; M4.4 logs trigger counts only,
+# tuning is M4.5 entry decision).
+max_retries: 3
+backoff_base: 2.0
+max_backoff: 30.0
+
+hydra:
+  run:
+    dir: experiments/outputs/${experiment_name}/${now:%Y%m%d-%H%M%S}
+  job:
+    chdir: false

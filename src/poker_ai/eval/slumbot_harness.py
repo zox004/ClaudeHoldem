@@ -40,10 +40,23 @@ Sync check granularity:
 
 Position mapping (Slumbot ↔ HUNLState):
 
-- ``client_pos == 0`` (SB / button) ↔ ``HUNLState.current_player == 1``
-- ``client_pos == 1`` (BB)          ↔ ``HUNLState.current_player == 0``
+- ``client_pos == 0`` (we are BB)   ↔ ``HUNLState.current_player == 0``
+- ``client_pos == 1`` (we are SB)   ↔ ``HUNLState.current_player == 1``
 
-(M3.2 / M4.0 spec: HUNLState player 0 = BB, player 1 = SB.)
+I.e. ``our_player_idx == client_pos`` (direct equality).
+
+**M4.4 self-audit (claude #24)**: Slumbot's API documentation as
+mirrored in third-party clients describes ``client_pos: 0=small
+blind/button``, but the live server's behavior is the opposite —
+the server takes the SB/button position and ``client_pos`` reports
+the role of the *client*. Verified live 2026-04-27: a fresh
+``new_hand`` consistently returns ``action`` strings starting with
+SB-side moves (e.g. ``"b200"``) when ``client_pos==0``, which is
+only consistent with the client being the BB (the server SB acts
+first preflop). The direct mapping above matches HUNLState's
+``player 0 = BB / player 1 = SB`` convention coincidentally. Doc
+drift is registered as mentor #10 candidate (cross-context fact
+verification, asset #22 generalisation).
 """
 
 from __future__ import annotations
@@ -181,9 +194,11 @@ def _reconstruct_deal(
     Layout (per :func:`HUNLGame.sample_deal`):
         ``(p0_h1, p0_h2, p1_h1, p1_h2, b1, b2, b3, b4, b5)``.
 
-    Our hole cards land at the right slots according to ``client_pos``:
-    Slumbot 0 (SB / button) maps to HUNLState player 1, so our hole
-    occupies slots 2..3. Slumbot 1 (BB) maps to player 0 (slots 0..1).
+    Our hole cards land at the right slots according to ``client_pos``
+    (claude #24 self-audit, M4.4 live verify): Slumbot's
+    ``client_pos == 0`` means *we* are the BB (HUNLState player 0,
+    slots 0..1); ``client_pos == 1`` means we are the SB (HUNLState
+    player 1, slots 2..3).
 
     Opponent hole and any unrevealed board slots are sampled uniformly
     from the remaining deck via ``rng``. Used for state-machine replay
@@ -205,11 +220,11 @@ def _reconstruct_deal(
     sampled = [int(remaining[int(i)]) for i in indices]
     opp_hole = sampled[:2]
     board_full = board_known + sampled[2:2 + n_missing_board]
-    if client_pos == 1:
+    if client_pos == 0:
         # We are BB → HUNLState player_idx 0 → hole at slots 0..1.
         deal = tuple(our_hole + opp_hole + board_full)
     else:
-        # We are SB / button → HUNLState player_idx 1 → hole at slots 2..3.
+        # client_pos == 1 → we are SB → HUNLState player_idx 1 → slots 2..3.
         deal = tuple(opp_hole + our_hole + board_full)
     return deal
 
@@ -284,7 +299,9 @@ class SlumbotHarness:
             list(first.hole_cards), list(first.board), first.client_pos, rng
         )
         client_pos = first.client_pos
-        our_player_idx = 1 if client_pos == 0 else 0
+        # M4.4 live-verified: Slumbot's client_pos directly equals
+        # HUNLState player_idx (0=BB, 1=SB) — see module docstring.
+        our_player_idx = client_pos
 
         last_response = first
         last_action_seq = first.action

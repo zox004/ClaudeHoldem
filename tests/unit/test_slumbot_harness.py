@@ -172,14 +172,14 @@ class TestHandSessionDataclass:
         rec = HandRecord(
             deal=_FIXED_DEAL,
             sequence="cb500c/kk/kk/kk",
-            client_pos=0,
+            client_pos=1,
             our_utility_chips=4,
             slumbot_winnings=200,
             sync_check=True,
         )
         assert rec.deal == _FIXED_DEAL
         assert rec.sequence == "cb500c/kk/kk/kk"
-        assert rec.client_pos == 0
+        assert rec.client_pos == 1
         assert rec.our_utility_chips == 4
         assert rec.slumbot_winnings == 200
         assert rec.sync_check is True
@@ -190,7 +190,7 @@ class TestHandSessionDataclass:
     def test_session_record_frozen_and_holds_hand_list(self) -> None:
         """SessionRecord exposes ``hands: list[HandRecord]`` and is slotted."""
         h = HandRecord(
-            deal=_FIXED_DEAL, sequence="f", client_pos=0,
+            deal=_FIXED_DEAL, sequence="f", client_pos=1,
             our_utility_chips=-1, slumbot_winnings=-50, sync_check=True,
         )
         sess = SessionRecord(hands=[h])
@@ -212,7 +212,7 @@ class TestMbbPerHandWinrate:
     def test_single_hand_mean_uses_bb_chip_value(self) -> None:
         """One hand at our_utility=2 chips (= 1 BB) → 1000 mbb/hand mean."""
         rec = HandRecord(
-            deal=_FIXED_DEAL, sequence="f", client_pos=0,
+            deal=_FIXED_DEAL, sequence="f", client_pos=1,
             our_utility_chips=BB_BLIND_CHIPS_VALUE,
             slumbot_winnings=100, sync_check=True,
         )
@@ -223,11 +223,11 @@ class TestMbbPerHandWinrate:
         """Mean over n hands == average of per-hand mbb values."""
         recs = [
             HandRecord(
-                deal=_FIXED_DEAL, sequence="f", client_pos=0,
+                deal=_FIXED_DEAL, sequence="f", client_pos=1,
                 our_utility_chips=2, slumbot_winnings=100, sync_check=True,
             ),
             HandRecord(
-                deal=_FIXED_DEAL, sequence="f", client_pos=0,
+                deal=_FIXED_DEAL, sequence="f", client_pos=1,
                 our_utility_chips=-2, slumbot_winnings=-100, sync_check=True,
             ),
         ]
@@ -238,7 +238,7 @@ class TestMbbPerHandWinrate:
         """SE = std / sqrt(n) under naive-IID assumption."""
         recs = [
             HandRecord(
-                deal=_FIXED_DEAL, sequence="f", client_pos=0,
+                deal=_FIXED_DEAL, sequence="f", client_pos=1,
                 our_utility_chips=k, slumbot_winnings=k * 50,
                 sync_check=True,
             )
@@ -273,7 +273,7 @@ class TestRetryPolicy:
         monkeypatch.setattr(
             "poker_ai.eval.slumbot_harness.time.sleep", lambda _s: None
         )
-        good = _resp(winnings=100, client_pos=0)
+        good = _resp(winnings=100, client_pos=1)
         client = _make_mock_client(
             new_hand_responses=[requests.HTTPError("500"), good]
         )
@@ -303,7 +303,7 @@ class TestRetryPolicy:
         err = requests.HTTPError("429")
         err.response = MagicMock()
         err.response.status_code = 429
-        good = _resp(winnings=0, client_pos=0)
+        good = _resp(winnings=0, client_pos=1)
         client = _make_mock_client(new_hand_responses=[err, good])
         h = SlumbotHarness(client, max_retries=3)
         out = h._retry_post(client.new_hand)
@@ -354,12 +354,12 @@ class TestPlayOneHand:
 
     def test_immediate_winnings_preflop_fold(self) -> None:
         """Slumbot folds preflop on first response → HandRecord, sync_check True."""
-        # We are BB (client_pos=1); Slumbot (SB) opens with fold.
+        # We are BB (client_pos=0); Slumbot (SB) opens with fold.
         # Action sequence "f" terminates immediately.
         winnings_slumbot = 50  # 1 SB stolen, in Slumbot chips
         first = _resp(
             action="f",
-            client_pos=1,
+            client_pos=0,
             hole_cards=["As", "Ad"],
             winnings=winnings_slumbot,
         )
@@ -370,25 +370,25 @@ class TestPlayOneHand:
         rec = h.play_one_hand(game, _uniform_strategy_fn(), rng)
         assert isinstance(rec, HandRecord)
         assert rec.sequence == "f"
-        assert rec.client_pos == 1
+        assert rec.client_pos == 0
         # client_pos=1 means we are BB; opponent folded → we collect blinds.
         assert rec.slumbot_winnings == winnings_slumbot
         assert rec.sync_check is True
 
     def test_mid_hand_loop_calls_act(self) -> None:
         """Mid-hand response triggers strategy sample → client.act()."""
-        # We are BB (client_pos=1). Slumbot SB raised "b300" preflop.
+        # We are BB (client_pos=0). Slumbot SB raised "b300" preflop.
         # Our turn (BB facing a raise) — FOLD is legal.
         first = _resp(
             action="b300",
-            client_pos=1,
+            client_pos=0,
             hole_cards=["2s", "3d"],
             winnings=None,
         )
         # We fold. Hand terminates with us losing the BB blind.
         second = _resp(
             action="b300f",
-            client_pos=1,
+            client_pos=0,
             hole_cards=["2s", "3d"],
             winnings=-100,
         )
@@ -407,12 +407,12 @@ class TestPlayOneHand:
 
     def test_showdown_termination_uses_slumbot_winnings_as_truth(self) -> None:
         """Showdown end: opp_hole unknown → utility from Slumbot, sync sign-only."""
-        # We are SB (client_pos=0). Both check down 4 streets (no money in
+        # We are SB (client_pos=1). Both check down 4 streets (no money in
         # past blinds), Slumbot wins by showdown — winnings = -50 (we lose
         # 1 SB blind to Slumbot's BB).
         first = _resp(
             action="cc/kk/kk/kk",
-            client_pos=0,
+            client_pos=1,
             hole_cards=["2s", "3d"],
             board=["7h", "Tc", "Js", "Qs", "Kc"],
             winnings=-50,
@@ -437,7 +437,7 @@ class TestPlayOneHand:
         """Hook 2 desync: terminal sequence but winnings=None → SlumbotError."""
         bad = _resp(
             action="f",
-            client_pos=0,
+            client_pos=1,
             hole_cards=["As", "Ad"],
             winnings=None,   # <-- desync: should be set on terminal
         )
@@ -456,11 +456,11 @@ class TestPlayOneHand:
 
     def test_multi_step_hand_three_exchanges(self) -> None:
         """Multi-step hand (≥3 client.act calls) terminates with HandRecord."""
-        # We are BB (client_pos=1). Slumbot opens with limp ("c"); we
+        # We are BB (client_pos=0). Slumbot opens with limp ("c"); we
         # check; flop runs; we check; river all check; showdown.
         first = _resp(
             action="c",
-            client_pos=1,
+            client_pos=0,
             hole_cards=["As", "Ad"],
             board=[],
             winnings=None,
@@ -468,7 +468,7 @@ class TestPlayOneHand:
         # After our preflop check ("k"/CALL), flop dealt, our turn again.
         second = _resp(
             action="cc/",
-            client_pos=1,
+            client_pos=0,
             hole_cards=["As", "Ad"],
             board=["7h", "Tc", "Js"],
             winnings=None,
@@ -476,7 +476,7 @@ class TestPlayOneHand:
         # After flop check, turn dealt, our turn again.
         third = _resp(
             action="cc/kk/",
-            client_pos=1,
+            client_pos=0,
             hole_cards=["As", "Ad"],
             board=["7h", "Tc", "Js", "Qs"],
             winnings=None,
@@ -484,7 +484,7 @@ class TestPlayOneHand:
         # After turn check, river dealt, our turn again.
         fourth = _resp(
             action="cc/kk/kk/",
-            client_pos=1,
+            client_pos=0,
             hole_cards=["As", "Ad"],
             board=["7h", "Tc", "Js", "Qs", "Kc"],
             winnings=None,
@@ -492,7 +492,7 @@ class TestPlayOneHand:
         # After river check, showdown — we win as P0 (BB).
         fifth = _resp(
             action="cc/kk/kk/kk",
-            client_pos=1,
+            client_pos=0,
             hole_cards=["As", "Ad"],
             board=["7h", "Tc", "Js", "Qs", "Kc"],
             winnings=100,
@@ -562,8 +562,8 @@ class TestPlaySession:
             game, _uniform_strategy_fn(),
             n_hands=100, rng=np.random.default_rng(0),
         )
-        n_pos0 = sum(1 for r in sess.hands if r.client_pos == 0)
-        n_pos1 = sum(1 for r in sess.hands if r.client_pos == 1)
+        n_pos0 = sum(1 for r in sess.hands if r.client_pos == 1)
+        n_pos1 = sum(1 for r in sess.hands if r.client_pos == 0)
         assert n_pos0 + n_pos1 == 100
         assert abs(n_pos0 - 50) <= 10, f"client_pos=0 count {n_pos0} too far from 50"
         assert abs(n_pos1 - 50) <= 10, f"client_pos=1 count {n_pos1} too far from 50"
@@ -572,7 +572,7 @@ class TestPlaySession:
         """SessionRecord → mbb_per_hand_winrate end-to-end pipeline."""
         responses = [
             _resp(
-                action="f", client_pos=0, hole_cards=["As", "Ad"],
+                action="f", client_pos=1, hole_cards=["As", "Ad"],
                 winnings=100,
             )
             for _ in range(5)
@@ -609,7 +609,7 @@ class TestPlaySession:
         monkeypatch.setattr(
             "poker_ai.eval.slumbot_harness.time.sleep", lambda _s: None
         )
-        good = _resp(action="f", client_pos=0, winnings=100)
+        good = _resp(action="f", client_pos=1, winnings=100)
         # First two hands succeed, third hand fails permanently.
         responses: list[SlumbotResponse | Exception] = [
             good, good,
@@ -637,11 +637,11 @@ class TestStrategyFnInterface:
     def test_distribution_sums_to_one_legal_action_sampled(self) -> None:
         """Uniform distribution sums to 1; harness samples a legal action."""
         first = _resp(
-            action="", client_pos=0, hole_cards=["As", "Ad"],
+            action="", client_pos=1, hole_cards=["As", "Ad"],
             winnings=None,
         )
         second = _resp(
-            action="f", client_pos=0, hole_cards=["As", "Ad"],
+            action="f", client_pos=1, hole_cards=["As", "Ad"],
             winnings=-100,
         )
         client = _make_mock_client(
@@ -660,11 +660,11 @@ class TestStrategyFnInterface:
         SB-to-act (no bet to call yet), harness must renormalise over
         legal actions instead of crashing."""
         first = _resp(
-            action="", client_pos=0, hole_cards=["As", "Ad"],
+            action="", client_pos=1, hole_cards=["As", "Ad"],
             winnings=None,
         )
         second = _resp(
-            action="cc/kk/kk/kk", client_pos=0,
+            action="cc/kk/kk/kk", client_pos=1,
             hole_cards=["As", "Ad"],
             board=["7h", "Tc", "Js", "Qs", "Kc"],
             winnings=-100,
@@ -718,7 +718,7 @@ class TestAuditHookCoverage:
             game, _uniform_strategy_fn(),
             n_hands=100, rng=np.random.default_rng(0),
         )
-        n0 = sum(1 for r in sess.hands if r.client_pos == 0)
+        n0 = sum(1 for r in sess.hands if r.client_pos == 1)
         # Strict ±10 of 50/50 (perfect alternation in mock should give 50).
         assert 40 <= n0 <= 60
 
@@ -726,7 +726,7 @@ class TestAuditHookCoverage:
         """Hook 2: utility sign matches Slumbot winnings sign on fold-only."""
         # client_pos=0 (we are SB), Slumbot folds preflop → we win.
         resp_pos0 = _resp(
-            action="f", client_pos=0,
+            action="f", client_pos=1,
             hole_cards=["As", "Ad"], winnings=100,
         )
         client = _make_mock_client(new_hand_responses=[resp_pos0])
@@ -740,7 +740,7 @@ class TestAuditHookCoverage:
 
         # client_pos=1 (we are BB), Slumbot folds preflop → we win.
         resp_pos1 = _resp(
-            action="f", client_pos=1,
+            action="f", client_pos=0,
             hole_cards=["As", "Ad"], winnings=50,
         )
         client = _make_mock_client(new_hand_responses=[resp_pos1])
@@ -761,7 +761,7 @@ class TestAuditHookCoverage:
         # Showdown end: 4 checks per street, board fully revealed.
         # Slumbot reports negative winnings (we lose).
         showdown = _resp(
-            action="cc/kk/kk/kk", client_pos=0,
+            action="cc/kk/kk/kk", client_pos=1,
             hole_cards=["2s", "3d"],
             board=["7h", "Tc", "Js", "Qs", "Kc"],
             winnings=-50,
@@ -802,11 +802,11 @@ class TestAuditHookCoverage:
         such mismatches without breaking the session.
         """
         first = _resp(
-            action="", client_pos=0, hole_cards=["As", "Ad"],
+            action="", client_pos=1, hole_cards=["As", "Ad"],
             winnings=None,
         )
         second = _resp(
-            action="f", client_pos=0, hole_cards=["As", "Ad"],
+            action="f", client_pos=1, hole_cards=["As", "Ad"],
             winnings=100,
         )
         client = _make_mock_client(

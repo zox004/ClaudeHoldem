@@ -32,7 +32,9 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "slow: slow tests requiring full training (e.g. Nash convergence)",
+    "live: tests that hit live external services (e.g. slumbot.com); skipped by default — run with `uv run pytest -m live`",
 ]
+addopts = "-m 'not live'"
 
 [tool.ruff]
 src = ["src"]

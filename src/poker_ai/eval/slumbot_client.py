@@ -80,9 +80,15 @@ class SlumbotResponse:
     Optional fields (``winnings`` and the ``session_*`` group) are
     ``None`` mid-hand; populated at hand termination and session
     boundaries respectively.
+
+    ``token`` is also optional: M4.4 live verify (claude #24 self-
+    audit) — Slumbot omits the ``token`` field on certain ``/api/act``
+    responses (e.g. mid-hand replies that don't rotate the session).
+    Callers / :meth:`SlumbotClient._post` keep the existing held
+    token in that case.
     """
 
-    token: str
+    token: str | None
     action: str
     client_pos: int
     hole_cards: list[str]
@@ -103,7 +109,7 @@ def _parse_response(body: dict[str, Any]) -> SlumbotResponse:
     if "error_msg" in body:
         raise SlumbotError(str(body["error_msg"]))
     return SlumbotResponse(
-        token=body["token"],
+        token=body.get("token"),
         action=body.get("action", ""),
         client_pos=int(body.get("client_pos", 0)),
         hole_cards=list(body.get("hole_cards", [])),
@@ -177,11 +183,15 @@ class SlumbotClient:
         return self._token
 
     def new_hand(self) -> SlumbotResponse:
-        """Starts a new hand. Body sends the current token (or ``None``
-        on first call for anonymous play); response token is captured
-        and refreshed automatically.
+        """Starts a new hand. Body sends the current token if held;
+        omits the token field entirely on the first anonymous call
+        (Slumbot rejects ``{"token": null}`` with HTTP 400 "Object
+        type exception: Expected string" — verified live in M4.4
+        pilot, 2026-04-27, claude self-audit #24).
         """
-        body: dict[str, Any] = {"token": self._token}
+        body: dict[str, Any] = {}
+        if self._token is not None:
+            body["token"] = self._token
         return self._post("/api/new_hand", body)
 
     def act(self, incr: str) -> SlumbotResponse:
@@ -209,5 +219,9 @@ class SlumbotClient:
         resp.raise_for_status()
         data = resp.json()
         parsed = _parse_response(data)
-        self._token = parsed.token
+        # Token is optional (M4.4 live verify): only update when the
+        # server provides a fresh value. Otherwise the previously-held
+        # token continues to authenticate subsequent requests.
+        if parsed.token is not None:
+            self._token = parsed.token
         return parsed
