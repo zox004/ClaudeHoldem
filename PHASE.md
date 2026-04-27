@@ -5,13 +5,13 @@
 
 ## 현재 상태
 
-**Phase**: **Phase 4 M2 closure (2026-04-26 야간)** — Pluribus path 검증 + HUNL implementation 진행 중.
-**완료**: M0 GameProtocol scaling, M1 HUNL game engine (7 commits, ~5h), M2 Pluribus path validation (2 commits, ~3h). **Phase 4 ETA 5-6개월 → 2-3 세션** (training time 별도). **581 unit + 3 integration GREEN**, ruff src clean, mypy strict clean (24 source files).
-**다음 세션 (M3)**: Postflop board-conditioned bucketing + 6-size action grid + full HUNL training run sanity. Phase 4 timeline 정식 재추정.
-**Self-audit**: 클코 21 / 멘토 7.
-**핵심 발견**: σ_seed (n=5, 3×64, T=500) = 0.010. **Day 4 Cap Δ Primary A = -0.008 (0.8σ, NOISE WITHIN)** — single-seed 결론 정식 무효. Strategy-side는 robust: σ̄_expl Cap effect 4.5σ (strongly significant). 가설 (c) sealed reject (random floor 3.65σ below trained), (d)/(f) rejected (Vanilla linear-uniform Pearson 0.96). **L-B (Step 5) 구현 실패** — Schmid 2019 baseline self-cancellation + wrong node type, 즉시 quarantine (default OFF). Variance reduction axis는 #2b-1 (Huber loss) 또는 (e) (advantage_epochs ↑)으로 재선택 필요.
-**테스트**: **unit 377 + integration fast 10 GREEN** (+17 since Day 4 — H Tier 1 + L-B 검증)
-**Next 세션 (Day 6, axis 재선택 결정 후)**: #2b-1 Huber 또는 (e) epoch ↑. 멘토와 합의 후 진행.
+**Phase**: **Phase 4 M3 closure (2026-04-27 09:13)** — Pluribus path 완성 + LBR baseline + 운영 변경.
+**완료**: M0 GameProtocol scaling, M1 HUNL game engine (7 commits), M2 Pluribus path validation (2 commits), **M3.1 PostflopBoardAbstractor + M3.2 6-action grid + M3.3 LBR (2-pass infoset aggregation) + M3.4 production 5-seed × 3-anchor baseline**. **669 unit + 7 HUNL integration GREEN**, ruff src clean, mypy strict clean (25 source files).
+**다음 (M4)**: Slumbot benchmark + training time reality check. M4 진입 시 멘토 약한 의견 받기.
+**Self-audit**: 클코 23 / 멘토 8 (M3 cluster: claude #22 LBR state-level peek, claude #23 test invariant 누락, mentor #8 External Sampling BR framing).
+**M3.4 baseline**: T=1k→T=100k LBR 2.35× 감소 (target 3× 부분 미달, healthy abstraction confirmed). 자세한 결과 본 파일 M3 closure 섹션.
+**운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘 영역 클코 의견 먼저. 자가 교정 문구 클코 작성.
+**테스트**: unit 669 + integration 7 GREEN (LBR 33 + M3.1 32 + M3.2 24 신규).
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -35,6 +35,129 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 4 M3 — Pluribus path 완성 + LBR baseline + 운영 변경 (2026-04-26 → 2026-04-27)
+
+> 4 commits (M3.1-M3.4) + 1 production run (221min, 5-seed × 3-anchor).
+> Phase 4 본질적 work 완성. M4 진입 직전.
+
+#### M3 산출물 (4 commits)
+
+| Commit | Step | LoC src+tests | Tests |
+|---|---|---|---|
+| `fbb7dc3` | M3.1 PostflopBoardAbstractor (lazy cache, scalar percentile) | 355 + 480 | +32 |
+| `2ec8ae9` | M3.2 6-action grid (NUM_ACTIONS=6, canonical collisions) | 130 + 430 | +24 |
+| `f11ed3d` | M3.3 LBR (2-pass infoset aggregation) | 560 + 660 | +33 |
+| (M3.4) | M3.4 Production baseline + closure | +480 (harness/conf/PHASE.md) | n/a (run-only) |
+
+산출물 details:
+- M3.1: `PostflopBoardAbstractor` round-aware single class (flop/turn/river), lazy cache + cache_stats(), AbstractedHUNLState.infoset_key board_bucket dispatch, M2 호환 단절 명시
+- M3.2: `AbstractedHUNLAction(IntEnum)` 6-way (FOLD/CALL/BET_HALF/BET_POT/BET_DOUBLE/BET_ALLIN), canonical collision rule (smaller index wins), encode unchanged
+- M3.3: LBR (Lisý & Bowling 2016 §3) proper 2-pass infoset aggregation (Pass 1 collect, Pass 2 argmax over CFV-aggregated, Pass 3 evaluate), exact/sampled dual mode auto-dispatch
+- M3.4: Production 5-seed × 3-anchor (T={1k, 10k, 100k}) LBR baseline + bucket occupancy histogram framework + W&B summary + plots
+
+#### M3.4 Production run 결과 (5-seed × 3-anchor)
+
+**Setup**: AbstractedHUNLGame(n_buckets=50, n_trials=10000, postflop_mc_trials=300, postflop_threshold_sample_size=10000), MCCFR ε=0.05, LBR n_samples=2000 paired.
+
+**LBR T-trend** (5-seed mean ± combined SE):
+
+| T | mean (chips) | combined SE | mean (mbb/g) | per-seed | SE/mean |
+|---|---|---|---|---|---|
+| 1,000 | +8.5018 | 1.0094 | 4250.9 | +9.76, +5.66, +10.59, +8.82, +7.69 | 12% |
+| 10,000 | +7.0172 | 0.5714 | 3508.6 | +8.15, +6.70, +7.40, +6.74, +6.09 | 8% |
+| 100,000 | +3.6109 | 0.5528 | 1805.5 | +2.82, +4.25, +2.88, +3.09, +5.01 | 15% |
+
+**Asset #11/#18 trend ratio T=1k→T=100k**: **2.35×** (target ≥3× 부분 미달, 22% 부족).
+
+**Bucket occupancy** (5-seed sum, 50 bucket × 4 round):
+
+| Round | Pattern | Total visits | max share | min share | empty | < 0.1% |
+|---|---|---|---|---|---|---|
+| preflop | balanced | 7,669 | 2.1% | 1.92% | 0 | 0 |
+| flop | sparse_acceptable | 1.96M | 2.4% | 0.72% | 0 | 0 |
+| turn | sparse_acceptable | 8.82M | 2.3% | 0.77% | 0 | 0 |
+| river | sparse_acceptable | 25.34M | 2.5% | 0.95% | 0 | 0 |
+
+→ **Healthy abstraction**: dead_buckets / collapse 없음. M3.1 scalar percentile + threshold_sample_size=10000 잘 작동. **M5 abstraction 재설계 신호 없음**.
+
+**Wall-clock**: 221min (5-seed parallel on M1 Pro 8 core, contention factor ~5x vs single-thread estimate).
+
+**W&B**: per-seed runs `m34-seed{42,123,456,789,1024}` + summary `m34-summary` (project `poker-ai-hunl`).
+
+#### Audit pass (5-seed)
+
+1. **Per-seed monotone consistency** ✓ — 모든 5 seeds T=1k > T=10k > T=100k. seed별 spread T=1k=4.9 → T=10k=2.0 → T=100k=2.2 chips
+2. **Pilot mean drop pattern audit** ✓ — Pilot single-run T=1k에서 n=100/500/1000 → 22.5/11.7/8.1 chips (finite sample noise dominant). 5-seed × n=2000에서 T=1k mean=8.5 (pilot n=1000와 consistent). cherry-pick risk 해소.
+3. **자산 #18 ADVERSE 검증** ✓ — T=10k→T=100k 1.94× 감소 (ADVERSE 신호 없음). Phase 3 Day 9 패턴 (T axis ADVERSE) 안 나타남.
+4. **자산 #11 convergence smoke** ✓ — T=1k+에서 모든 seed visit count > 7k preflop infosets, MCCFR active learning 확인.
+5. **Cache hit rate** ✓ — 99%+ 일관 (M3.1 lazy cache 효과).
+
+#### ≥3× target 부분 미달 framing
+
+2.35× 감소 (target 3× 22% 부족). 단정 거부, **3 mechanism 모두 가능**:
+
+- (a) **Abstraction floor**: 50 buckets로 인한 information loss saturate. Phase 5 distribution-aware K-means hook (자산 #22 후보의 정확성 향상).
+- (b) **MCCFR budget**: T=10⁵ < Pluribus 표준 T=10⁹. T=10k→T=100k 1.94× 감소가 자연 trajectory (slope 보존), 진짜 floor인지 budget 부족인지 미확정.
+- (c) **LBR rollout floor**: rollout policy "always-CALL"이 myopic argmax 영향. Phase 5 distribution-aware rollout hook.
+
+→ **M4 Slumbot benchmark에서 absolute 정량 필요** — Phase 4 진척도 신뢰 측정의 정통 metric. M3.4 baseline은 *상대* monotone trend + per-seed consistency + healthy abstraction까지만 단정.
+
+#### Self-audit log update (M3 cluster)
+
+총 3건 신규 등록:
+
+| # | 발견 | Commit |
+|---|---|---|
+| **claude #22** | M3.3 state-level argmax LBR이 hidden info peek → Lemma 1 위반 (LBR > exact). Lisý & Bowling 2016 §3 pseudocode를 mechanical 패턴 transfer로 옮기면서 `exploitability.py` Pass-1 infoset-aggregation 단계 누락. **자산 #13 (variance reduction must preserve E[r̂]=E[r_legacy]) 정신 위반** — 잘못된 estimator. `test_kuhn_near_nash_small` 1 test fail로 자가 발견 (Kuhn LBR=0.125 vs exact=0.002, ratio 60×). 2-pass infoset aggregation으로 재구현. 알고리즘 pseudocode 정확성 ≠ implementation 정확성. | `f11ed3d` |
+| **claude #23** | M3.3 test-writer prompt에 잘못된 LBR invariant 2개 포함. (a) "different seeds → different results" — exact 모드 (Kuhn/Leduc all_deals enum)는 RNG 무관. (b) "v_lbr > 0 for non-Nash σ" — LBR_exploitability ≥ 0 보장 안 됨 (LBR ≤ BR이지 LBR ≥ 0 아님). closure pass에서 `np.isfinite` sanity 완화. test invariant audit hook을 prompt 단계에서 검증해야 함. | `f11ed3d` (test 보정) |
+| **mentor #8** | M3.3 진입 시 (D) "External Sampling BR (Lanctot 2009 §3.3, Phase 2 MCCFR sampling scheme transfer)" 권고. 그러나 Lanctot §3.3 external sampling은 strategy training용 unbiased regret estimator (Theorem 4)이고 BR evaluation에 직접 transfer되지 않음. BR은 infoset-level decision으로 v(I, a) = Σ_{h ∈ I} π_{-i}(h) · v(ha) aggregation 필요 — 1 trajectory sampling은 다른 history weight 누락. 자산 #13 정신 위반: estimator의 use-case 의존성을 일반 패턴 transfer로 처리. 클코 push back으로 발견, LBR (Lisý & Bowling 2016) + Leduc/Kuhn exact 비교 multi-tier 채택. **mentor 누계 7 → 8** (모두 클코·데이터·사용자 발견). | M3.3 진입 |
+
+**누계: claude 23 / mentor 8.**
+
+#### 신규 자산 등록 (M3 cluster, 2건)
+
+**자산 #22**: Algorithm pseudocode 정확성 ≠ implementation 정확성. infoset-level vs state-level aggregation 같은 semantic 디테일 누락 가능. unit test가 trivial passes로 가려질 수 있음 — Lemma/bound 검증 test가 invariant audit hook으로 필수.
+- 발견: M3.3 LBR state-level argmax 버그 (claude #22)
+- Phase 4+ transfer: LBR / AIVAT / BR estimator 추가 시 항상 Lemma/bound test로 lock
+
+**자산 #23**: Test-writer prompt에 invariant claim을 cross-check 없이 포함하면 false positive 위험. exact mode vs sampled mode 등 game-class-dependent invariant은 prompt 단계에서 검증 필요.
+- 발견: M3.3 test 설계 오류 2건 (claude #23)
+- Phase 4+ transfer: 새 estimator/algorithm test prompt에 invariant 명세 cross-check 단계 추가
+
+**총 자산 카탈로그**: 23건 (Phase 3 21건 + M3 cluster 2건).
+
+#### 운영 변경 노트 (2026-04-26 사용자 결정)
+
+**멘토 강한 권고 → 약한 제시 톤 전환**
+
+데이터:
+- 누적 mentor self-correction 8건 (Phase 1 시작 - Phase 4 M3.3까지)
+- 발견 출처: 클코 / 데이터 / 사용자 = 8/0 (mentor 단독 발견 = 0)
+- 영역 분포: 통계 4 (CFR+ vs Vanilla, Pearson scale, 단일 seed → fair, "Deep CFR 우리 path") + 알고리즘 3 (buffer-side weighting, bidirectional → unidirectional, External Sampling BR) + 프레이밍 1 (cross-algorithm cutoff)
+
+운영 패턴 변경:
+- mentor 응답 패턴: "옵션 X와 Y가 있어요. 클코 의견은?" (단정형 회피)
+- 통계 / 알고리즘 / unbiasedness / convergence 영역에서 **클코 의견 먼저 묻기**
+- mentor 강한 push가 정당한 영역: 명백한 코드 버그, 자산 직접 위반, 사용자 요구
+
+클코 응답 패턴 (변경 없음, 강화):
+- 코드 사실 검증 우선 (read+grep before opinion)
+- 멘토 의견에 동의/반대 명시 + 근거
+- statistical correctness 영역에서 강한 push back 환영
+
+**자가 교정 문구 작성 권한**: mentor self-correction 발생 시 클코가 직접 작성. 근거: 자기 변호 톤 회피, 분석 정확도 ↑ (오류 발견자가 작성), Phase 3 자가 교정 패턴 일관 (PHASE.md mentor #1-7 문구).
+
+#### Phase 4 ETA 갱신 (M3 reality check)
+
+| M | 원래 | M3 closure 시점 |
+|---|---|---|
+| M3 postflop + full | 3-4개월 (M0-M2 closure 시 1-2 세션 추정) | **실제 4 세션 + 1 production run (221min)**. 자체 audit + design 결정 시간이 dominant |
+| M4 Slumbot benchmark | 5-6개월 | **training time + benchmark setup 별도 reality check** |
+
+**Phase 4 본질적 work (M0-M3)**: 5-6개월 → **3-4 세션 + production runs**. M0-M2가 30-40× 단축, M3이 audit-driven 4 세션 + production run cost dominant. 전체 ~10-15× ETA 단축 (M3 audit 비용 포함). M4 진입 시 멘토 약한 의견 받기.
+
+---
 
 ### Phase 4 M0+M1+M2 — Pluribus path 작동 + 40-50× ETA 단축 (2026-04-26 오후-야간)
 
