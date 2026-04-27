@@ -31,15 +31,19 @@ class TestModuleConstants:
         """Mentor's padding decision: 10 actions × 4 rounds."""
         assert HISTORY_MAX_LEN == 40
 
-    def test_starting_stack_is_100_bb(self) -> None:
-        """Heads-up cash standard (Slumbot / DecisionHoldem benchmark)."""
-        assert STARTING_STACK_BB == 100
+    def test_starting_stack_is_200_bb(self) -> None:
+        """Slumbot 2019 / ACPC 2017+ Doyle's Game standard (M4.0 reconfigure,
+        mentor #9 self-correction: prior 100 BB design was based on
+        incorrect Slumbot fact statement)."""
+        assert STARTING_STACK_BB == 200
 
     def test_chip_granularity_doubled_big_blind(self) -> None:
-        """1 BB = 2 chips so 0.5 BB (small blind) = 1 chip exact."""
+        """1 BB = 2 chips so 0.5 BB (small blind) = 1 chip exact.
+        Slumbot HTTP API uses absolute BB=100 chips; the M4.1 adapter
+        multiplies by 50 to convert. M4.0 keeps the internal granularity."""
         assert BIG_BLIND_CHIPS == 2
         assert STARTING_STACK_CHIPS == STARTING_STACK_BB * BIG_BLIND_CHIPS
-        assert STARTING_STACK_CHIPS == 200
+        assert STARTING_STACK_CHIPS == 400
 
 
 # =============================================================================

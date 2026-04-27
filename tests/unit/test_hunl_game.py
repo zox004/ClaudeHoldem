@@ -221,24 +221,34 @@ class TestEncodeRoundOnehot:
 
 class TestEncodeScalarsNormalization:
     def test_root_preflop_scalars(self) -> None:
+        from poker_ai.games.hunl_state import STARTING_STACK_CHIPS
+        bankroll = 2 * STARTING_STACK_CHIPS
         state = HUNLGame.state_from_deal((0, 1, 2, 3, 4, 5, 6, 7, 8))
         arr = HUNLGame.encode(state)
-        # pot = 3 / 400 = 0.0075
-        assert arr[18] == pytest.approx(3 / 400.0)
-        # stack_p0 = 198 / 200 = 0.99
-        assert arr[19] == pytest.approx(198 / 200.0)
-        # stack_p1 = 199 / 200 = 0.995
-        assert arr[20] == pytest.approx(199 / 200.0)
-        # last_raise = 2 / 200 = 0.01
-        assert arr[21] == pytest.approx(2 / 200.0)
+        # pot = 3 / bankroll
+        assert arr[18] == pytest.approx(3 / bankroll)
+        # stack_p0 = STARTING_STACK_CHIPS - BB(=2) / STARTING_STACK_CHIPS
+        assert arr[19] == pytest.approx(
+            (STARTING_STACK_CHIPS - 2) / STARTING_STACK_CHIPS
+        )
+        # stack_p1 = STARTING_STACK_CHIPS - SB(=1) / STARTING_STACK_CHIPS
+        assert arr[20] == pytest.approx(
+            (STARTING_STACK_CHIPS - 1) / STARTING_STACK_CHIPS
+        )
+        # last_raise = 2 / STARTING_STACK_CHIPS
+        assert arr[21] == pytest.approx(2 / STARTING_STACK_CHIPS)
 
     def test_after_sb_raise_scalars_update(self) -> None:
+        from poker_ai.games.hunl_state import STARTING_STACK_CHIPS
+        bankroll = 2 * STARTING_STACK_CHIPS
         state = HUNLGame.state_from_deal((0, 1, 2, 3, 4, 5, 6, 7, 8))
         state = state.next_state(HUNLAction.BET, bet_size=10)
         arr = HUNLGame.encode(state)
-        # pot = 12 (SB 10 + BB 2). stack_p1 = 200-10 = 190.
-        assert arr[18] == pytest.approx(12 / 400.0)
-        assert arr[20] == pytest.approx(190 / 200.0)
+        # pot = 12 (SB 10 + BB 2). stack_p1 = STARTING_STACK_CHIPS - 10.
+        assert arr[18] == pytest.approx(12 / bankroll)
+        assert arr[20] == pytest.approx(
+            (STARTING_STACK_CHIPS - 10) / STARTING_STACK_CHIPS
+        )
 
 
 class TestEncodeBettingHistory:
@@ -263,12 +273,13 @@ class TestEncodeBettingHistory:
             assert arr[22 + i * 2 + 1] == 0.0
 
     def test_bet_action_records_size(self) -> None:
+        from poker_ai.games.hunl_state import STARTING_STACK_CHIPS
         state = HUNLGame.state_from_deal((0, 1, 2, 3, 4, 5, 6, 7, 8))
         state = state.next_state(HUNLAction.BET, bet_size=10)
         arr = HUNLGame.encode(state)
-        # Slot 0 = BET (id 2), size 10/200 = 0.05.
+        # Slot 0 = BET (id 2), size 10/STARTING_STACK_CHIPS.
         assert arr[22 + 0] == pytest.approx(2 / 3.0)
-        assert arr[22 + 1] == pytest.approx(10 / 200.0)
+        assert arr[22 + 1] == pytest.approx(10 / STARTING_STACK_CHIPS)
 
 
 class TestEncodeBoundsSanity:

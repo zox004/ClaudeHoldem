@@ -133,8 +133,8 @@ class TestLegalActions:
     def test_no_bet_when_opponent_all_in(self) -> None:
         """Once opponent has stack 0, BET is illegal (heads-up no side pot)."""
         s = _root_preflop()
-        # SB shoves all-in.
-        s = s.next_state(HUNLAction.BET, bet_size=200)  # SB total 200
+        # SB shoves all-in (full stack).
+        s = s.next_state(HUNLAction.BET, bet_size=STARTING_STACK_CHIPS)
         # BB to act. SB has stack 0; BET should be illegal.
         legal = set(s.legal_actions())
         assert HUNLAction.BET not in legal
@@ -155,10 +155,11 @@ class TestLegalBetSizes:
         assert sizes[0] == 4
 
     def test_root_preflop_max_is_all_in(self) -> None:
-        """SB max = SB current contribution (1) + SB stack (199) = 200."""
+        """SB max = SB current contribution (SB blind) + SB remaining stack
+        = STARTING_STACK_CHIPS."""
         s = _root_preflop()
         sizes = s.legal_bet_sizes()
-        assert sizes[-1] == 200
+        assert sizes[-1] == STARTING_STACK_CHIPS
 
     def test_legal_bet_sizes_empty_when_bet_illegal(self) -> None:
         s = _root_preflop().next_state(HUNLAction.FOLD)
@@ -267,16 +268,17 @@ class TestRoundTransitions:
 # =============================================================================
 class TestAllInHandling:
     def test_sb_shove_then_bb_call_closes_round_and_advances(self) -> None:
-        """SB all-in 200, BB calls 200 → round closes, advance through
-        turns/rivers automatically? Actually no — round closes, board
-        reveals next street, but then no more betting (both all-in)."""
+        """SB all-in (full stack), BB calls all-in → round closes, advance
+        through turns/rivers automatically? Actually no — round closes,
+        board reveals next street, but then no more betting (both
+        all-in)."""
         s = _root_preflop()
-        s = s.next_state(HUNLAction.BET, bet_size=200)   # SB all-in
+        s = s.next_state(HUNLAction.BET, bet_size=STARTING_STACK_CHIPS)
         s = s.next_state(HUNLAction.CALL)                # BB calls all-in
         # Round closes; both players have stack 0; further betting impossible.
         assert s.stack_p0 == 0
         assert s.stack_p1 == 0
-        assert s.pot == 400
+        assert s.pot == 2 * STARTING_STACK_CHIPS
 
     def test_legal_bet_sizes_capped_at_opponent_effective_stack(self) -> None:
         """In heads-up, the bet ceiling is min(actor_all_in, opponent_max).
@@ -300,7 +302,9 @@ class TestAllInHandling:
         assert sizes[-1] == 22   # BB contribution 2 + stack 20
 
     def test_no_bet_after_opponent_all_in(self) -> None:
-        s = _root_preflop().next_state(HUNLAction.BET, bet_size=200)
+        s = _root_preflop().next_state(
+            HUNLAction.BET, bet_size=STARTING_STACK_CHIPS
+        )
         # BB to act. SB stack=0. BET illegal.
         assert HUNLAction.BET not in s.legal_actions()
 

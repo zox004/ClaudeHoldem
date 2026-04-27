@@ -57,7 +57,7 @@ _HISTORY_FLAT_LEN: int = 40
 
 _NORM_RANK: float = 12.0
 _NORM_SUIT: float = 3.0
-_NORM_POT: float = 400.0   # 2 × STARTING_STACK_CHIPS
+_NORM_POT: float = 2.0 * float(STARTING_STACK_CHIPS)   # 2 × stack (bankroll cap)
 _NORM_STACK: float = float(STARTING_STACK_CHIPS)
 _NORM_LAST_RAISE: float = float(STARTING_STACK_CHIPS)
 _NORM_ACTION_ID: float = 3.0   # max HUNLAction value (NULL_PADDING=3)

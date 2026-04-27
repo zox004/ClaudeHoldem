@@ -37,12 +37,16 @@ Constants:
   encode time (mentor padding decision: 10 actions × 4 rounds).
 - ``BIG_BLIND_CHIPS = 2`` — internal chip granularity (1 BB = 2 chips
   so 0.5 BB = 1 chip exact, no fractional arithmetic on the hot path).
-- ``STARTING_STACK_BB = 100`` — Slumbot / DecisionHoldem benchmark
-  match (mentor sign-off Q on stack depth).
-- ``STARTING_STACK_CHIPS = STARTING_STACK_BB * BIG_BLIND_CHIPS = 200``.
+  Slumbot adapter (M4.1) multiplies by 50 to match the Slumbot HTTP
+  API's BB=100 absolute chip convention.
+- ``STARTING_STACK_BB = 200`` — Slumbot / ACPC Doyle's Game standard
+  (M4.0 reconfigure, mentor #9 self-correction: prior 100 BB design
+  was based on incorrect "Slumbot uses 100 BB" fact statement;
+  Slumbot 2019 / ACPC 2017+ all use 200 BB).
+- ``STARTING_STACK_CHIPS = STARTING_STACK_BB * BIG_BLIND_CHIPS = 400``.
 
-The bankroll invariant ``pot + stack_p0 + stack_p1 == 400`` is enforced
-in :meth:`HUNLState.__post_init__`.
+The bankroll invariant ``pot + stack_p0 + stack_p1 == 800`` is
+enforced in :meth:`HUNLState.__post_init__` (= 2 × STARTING_STACK_CHIPS).
 """
 
 from __future__ import annotations
@@ -73,8 +77,8 @@ class HUNLAction(IntEnum):
 
 HISTORY_MAX_LEN: Final[int] = 40
 BIG_BLIND_CHIPS: Final[int] = 2
-STARTING_STACK_BB: Final[int] = 100
-STARTING_STACK_CHIPS: Final[int] = STARTING_STACK_BB * BIG_BLIND_CHIPS
+STARTING_STACK_BB: Final[int] = 200
+STARTING_STACK_CHIPS: Final[int] = STARTING_STACK_BB * BIG_BLIND_CHIPS   # 400
 
 NUM_PRIVATE_CARDS_PER_PLAYER: Final[int] = 2
 NUM_PRIVATE_CARDS: Final[int] = 4   # 2 × 2 players

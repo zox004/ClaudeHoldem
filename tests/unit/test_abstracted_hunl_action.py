@@ -53,7 +53,7 @@ from poker_ai.games.hunl_abstraction import (
     PostflopBoardAbstractor,
     compute_size,
 )
-from poker_ai.games.hunl_state import HUNLAction, HUNLState
+from poker_ai.games.hunl_state import HUNLAction, HUNLState, STARTING_STACK_CHIPS
 
 
 # Card-id helper for fixtures.
@@ -82,9 +82,22 @@ def _make_flop_state(
 ) -> HUNLState:
     """Builds a synthetic flop-round state with the requested chip layout.
 
-    Bankroll invariant ``pot + stack_p0 + stack_p1 == 400`` is enforced by
-    :class:`HUNLState`; callers must satisfy it.
+    Bankroll invariant (``pot + stack_p0 + stack_p1 == 2 ×
+    STARTING_STACK_CHIPS``) is auto-balanced via ``stack_p1`` padding so
+    callsites can keep semantically meaningful (pot, effective_stack)
+    pairs across STARTING_STACK_BB reconfigures (M4.0 200 BB shift).
+    The asymmetry only affects the non-acting opponent's deep stack,
+    not the effective-stack collision regime under test.
     """
+    bankroll = 2 * STARTING_STACK_CHIPS
+    actual = pot + stack_p0 + stack_p1
+    if actual != bankroll:
+        stack_p1 = bankroll - pot - stack_p0
+        if stack_p1 < 0:
+            raise ValueError(
+                f"cannot auto-balance: pot={pot} + stack_p0={stack_p0} "
+                f"exceeds bankroll {bankroll}"
+            )
     return HUNLState(
         private_cards=private_cards,
         pending_board=pending_board,
@@ -310,10 +323,24 @@ class TestIllegalActionRaises:
         """When opponent is all-in (opp_stack == 0), raw BET is illegal,
         so every BET_* enum must be illegal too. next_state(BET_POT) must
         raise ValueError."""
-        # Bankroll 400: pot=200, stack_p0=200, stack_p1=0 (P1 all-in).
-        # Actor=P0; opp_stack=0 → raw legal_actions excludes BET.
-        raw = _make_flop_state(
-            pot=200, stack_p0=200, stack_p1=0, current_player=0
+        # Bankroll 2 × STARTING_STACK_CHIPS: pot eats most chips so opp
+        # is all-in. Bypass _make_flop_state's auto-balance by passing
+        # stack_p1=0 with explicit pot satisfying the invariant.
+        bankroll = 2 * STARTING_STACK_CHIPS
+        stack_p0 = STARTING_STACK_CHIPS
+        pot = bankroll - stack_p0   # leaves stack_p1 = 0 exact
+        raw = HUNLState(
+            private_cards=(0, 1, 2, 3),
+            pending_board=(4, 5, 6, 7, 8),
+            board_cards=(4, 5, 6),
+            round_history=((), (), (), ()),
+            round_bet_sizes=((), (), (), ()),
+            current_round=1,
+            current_player=0,
+            stack_p0=stack_p0,
+            stack_p1=0,
+            last_raise_increment=2,
+            pot=pot,
         )
         state = _wrap(raw, game)
         with pytest.raises(ValueError):
