@@ -207,6 +207,87 @@ def test_game_config_starting_stack_bb_equals_constant(tmp_path: Path) -> None:
     assert loaded["game_config"]["starting_stack_bb"] == 200
 
 
+# ---------------------------------------------------------------------------
+# M4.5.0a — α (lock-serialized dump) + atomic rename
+# ---------------------------------------------------------------------------
+def test_dump_strategy_accepts_lock_kwarg(tmp_path: Path) -> None:
+    """``lock=`` kwarg accepted; round-trip works under a real
+    threading lock. Used by the M4.5.0a Manager.Lock injection from
+    the spawn-pool worker initializer.
+    """
+    import threading
+
+    out = tmp_path / "seed42.pkl"
+    strategy = _toy_strategy()
+    dump_strategy(
+        strategy,
+        seed=42,
+        T=100_000,
+        game_config=_toy_game_config(),
+        n_infosets_by_round=count_infosets_by_round(strategy),
+        out_path=out,
+        lock=threading.Lock(),
+    )
+    loaded = load_strategy(out)
+    assert loaded["seed"] == 42
+
+
+def test_dump_strategy_uses_atomic_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Atomic write invariant: ``dump_strategy`` writes a .tmp sibling
+    first and ``Path.rename``-s it onto ``out_path``. Prevents the
+    M4.5.0 1차-시도 failure mode where killing mid-dump left half-written
+    .pkl files indistinguishable from valid ones.
+    """
+    out = tmp_path / "seed42.pkl"
+    strategy = _toy_strategy()
+
+    rename_calls: list[tuple[Path, Path]] = []
+    original_rename = Path.rename
+
+    def _capturing_rename(self: Path, target: Path) -> Path:
+        rename_calls.append((self, Path(target)))
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", _capturing_rename)
+
+    dump_strategy(
+        strategy,
+        seed=42,
+        T=100_000,
+        game_config=_toy_game_config(),
+        n_infosets_by_round=count_infosets_by_round(strategy),
+        out_path=out,
+    )
+
+    assert len(rename_calls) == 1, (
+        f"expected exactly 1 atomic rename call, got {len(rename_calls)}"
+    )
+    src, dst = rename_calls[0]
+    assert dst == out
+    assert src.suffix == ".tmp" or src.name.endswith(".tmp"), (
+        f"source must be a .tmp sibling, got {src}"
+    )
+    assert out.is_file()
+
+
+def test_dump_strategy_no_tmp_leftover_after_success(tmp_path: Path) -> None:
+    """After a successful dump, no ``.tmp`` sibling lingers in the dir."""
+    out = tmp_path / "seed42.pkl"
+    strategy = _toy_strategy()
+    dump_strategy(
+        strategy,
+        seed=42,
+        T=100_000,
+        game_config=_toy_game_config(),
+        n_infosets_by_round=count_infosets_by_round(strategy),
+        out_path=out,
+    )
+    leftover = list(tmp_path.glob("*.tmp"))
+    assert leftover == [], f"unexpected .tmp leftover: {leftover}"
+
+
 def test_dump_strategy_rejects_wrong_starting_stack_bb(tmp_path: Path) -> None:
     """Defensive: callers cannot accidentally dump under a non-200 stack
     config. M4.0 lesson: stack drift between training-time and

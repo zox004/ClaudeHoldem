@@ -41,10 +41,12 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+import os
 import pickle
 import time
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, ContextManager
 
 import hydra
 import numpy as np
@@ -61,6 +63,22 @@ log = logging.getLogger(__name__)
 # warning so downstream M4.5.1 can decide whether to investigate
 # abstractor non-determinism (none expected, but artifact-level guard).
 _INFOSET_SPREAD_AUDIT_THRESHOLD = 0.05
+
+# M4.5.0a: spawn-pool-shared lock for dump serialization. Set by
+# ``_worker_init`` via ``initargs``; ``None`` if running without a pool
+# or in tests.
+_DUMP_LOCK: ContextManager[Any] | None = None
+
+
+def _worker_init(lock: ContextManager[Any]) -> None:
+    """Spawn-pool worker initializer. Stores the shared
+    ``multiprocessing.Manager.Lock`` (or any context-manager lock) in a
+    module-global so ``_run_seed`` can pass it to ``dump_strategy``
+    without threading it through ``cfg_dict`` (Manager proxies are not
+    OmegaConf-serializable).
+    """
+    global _DUMP_LOCK
+    _DUMP_LOCK = lock
 
 
 # =============================================================================
@@ -99,11 +117,23 @@ def dump_strategy(
     game_config: dict[str, Any],
     n_infosets_by_round: dict[int, int],
     out_path: Path,
+    lock: ContextManager[Any] | None = None,
 ) -> Path:
-    """Pickles the artifact dict to ``out_path``. Validates that
-    ``game_config["starting_stack_bb"] == STARTING_STACK_BB`` to prevent
-    the 100 BB ↔ 200 BB confusion that triggered mentor #9
+    """Pickles the artifact dict to ``out_path`` atomically. Validates
+    that ``game_config["starting_stack_bb"] == STARTING_STACK_BB`` to
+    prevent the 100 BB ↔ 200 BB confusion that triggered mentor #9
     self-correction at M4.0 entry.
+
+    M4.5.0a contract:
+
+    * Atomic write — pickles to ``<out_path>.tmp`` first, fsync, then
+      ``Path.rename`` onto ``out_path``. Truncated ``.pkl`` files are
+      structurally impossible (only ``.tmp`` files can be partial).
+    * ``lock`` (optional) — when supplied, the entire dump (write +
+      fsync + rename) runs inside ``with lock:``. Used by the M4.5.0a
+      spawn-pool to serialize 5 worker dumps so unified-memory swap
+      pressure (root cause of the 1차-시도 3/5 truncation) cannot
+      recur.
     """
     stack_bb = game_config.get("starting_stack_bb")
     if stack_bb != STARTING_STACK_BB:
@@ -119,8 +149,15 @@ def dump_strategy(
         "n_infosets_by_round": dict(n_infosets_by_round),
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("wb") as fh:
-        pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+
+    cm: ContextManager[Any] = lock if lock is not None else nullcontext()
+    with cm:
+        with tmp_path.open("wb") as fh:
+            pickle.dump(artifact, fh, protocol=pickle.HIGHEST_PROTOCOL)
+            fh.flush()
+            os.fsync(fh.fileno())
+        tmp_path.rename(out_path)
     return out_path
 
 
@@ -192,6 +229,7 @@ def _run_seed(seed: int, cfg_dict: dict[str, Any]) -> dict[str, Any]:
         game_config=game_config,
         n_infosets_by_round=counts,
         out_path=out_path,
+        lock=_DUMP_LOCK,
     )
     pickle_size_mb = written.stat().st_size / (1024.0 * 1024.0)
 
@@ -262,12 +300,27 @@ def _run_all_seeds(cfg: DictConfig, out_dir: Path) -> list[dict[str, Any]]:
     seeds = list(cfg.seeds)
 
     if bool(cfg.parallel):
-        log.info("Running %d seeds in parallel (multiprocessing.Pool)", len(seeds))
+        log.info(
+            "Running %d seeds in parallel (multiprocessing.Pool, "
+            "Manager.Lock-serialized dumps)",
+            len(seeds),
+        )
         ctx = mp.get_context("spawn")
-        with ctx.Pool(len(seeds)) as pool:
-            results = pool.starmap(
-                _run_seed, [(int(s), cfg_dict) for s in seeds]
-            )
+        # Manager.Lock proxy crosses spawn-process boundaries. Workers
+        # use it via the module-global ``_DUMP_LOCK`` set in
+        # ``_worker_init`` so the entire pickle.dump+fsync+rename for
+        # one seed is exclusive — eliminates the 1차-시도 root cause
+        # (5×1.1GB concurrent dumps swap-bound on 16GB unified memory).
+        with mp.Manager() as manager:
+            dump_lock = manager.Lock()
+            with ctx.Pool(
+                len(seeds),
+                initializer=_worker_init,
+                initargs=(dump_lock,),
+            ) as pool:
+                results = pool.starmap(
+                    _run_seed, [(int(s), cfg_dict) for s in seeds]
+                )
     else:
         log.info("Running %d seeds sequentially", len(seeds))
         results = [_run_seed(int(s), cfg_dict) for s in seeds]

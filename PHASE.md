@@ -5,13 +5,13 @@
 
 ## 현재 상태
 
-**Phase**: **Phase 4 M4.5.0 partial — strategy persist infra + first attempt 2/5 success (2026-04-28 새벽)**. Train+dump script + TDD test (9/9 GREEN) committed. 5-seed parallel run: 2 pickle (seed42, seed123) ~1.1GB STOP-opcode validated, 3 (seed456, 789, 1024) truncated by premature kill.
-**완료**: M0/M1/M2 + M3.1-M3.4 + M4.0-M4.4 + **M4.5.0 infra (script + 9 unit tests)**. **771 unit GREEN** (762 + 9 신규), ruff/mypy clean (28 src files).
-**다음 (M4.5.0 retry)**: 3 truncated seed (456, 789, 1024) re-train. **이슈 분석**: 동시 5-worker × 1.1GB pickle.dump → swap 압박 → dump 30~60min/worker. fastest worker (seed42) 3h 28m, kill 시점 (00:48) parent read-stuck = "hang"이 아니라 단순히 잔여 worker dump 진행 중이었다는 사실이 ls-stable 5초 snapshot으로 잘못 판단. 해결 옵션: (α) atomic rename + fcntl lock으로 dump 직렬화, (β) sequential worker로 메모리 압박 제거 (~20h), (γ) pickle 대신 npz/sqlite. 사용자 결정 대기.
-**Self-audit**: 클코 25 / 멘토 10 (변화 없음). M4.5.0 first-attempt premature-kill은 **자산 #22 cross-context-transfer 5번째 instance 후보** — "ls 5초 stable = process idle"이라는 직관 (다른 컨텍스트의 정답)을 spawn-pool dump-in-progress 컨텍스트로 verification 없이 transfer.
-**자산 카탈로그**: 24 (변동 없음). M4.5.0 retry 후 spawn-pool dump-serialization 패턴이 일반 패턴이면 자산 #25 후보 (large-artifact dump under spawn-pool memory pressure).
+**Phase**: **Phase 4 M4.5.0a closure — strategy persist 5/5 success (2026-04-28 새벽)**. α (Manager.Lock dump 직렬화) + atomic tmp→rename 적용 후 5/5 STOP-opcode validated. Wall total **204.33 min (3h 24min)** — 1차 시도 추정 5h+의 60-70%, dump 가속 7x.
+**완료**: M0/M1/M2 + M3.1-M3.4 + M4.0-M4.4 + **M4.5.0/0a (script + 12 unit tests + 5 valid pickle)**. **774 unit GREEN** (762 + 12 신규), ruff/mypy clean (28 src files).
+**다음 (M4.5.1)**: 1k mini-pilot 5-seed parallel vs Slumbot. Strategy load → uniform-mask 대신 trained policy 사용 → divergence rate 비교 (uniform baseline 17%).
+**Self-audit**: 클코 25 / 멘토 10 (변화 없음). M4.5.0 1차 premature-kill은 **자산 #22 cross-context-transfer 5번째 instance 정식 등록 (M4.5.0a closure 시점)** — "ls 5초 stable = process idle" cross-context heuristic transfer without verification.
+**자산 카탈로그**: 24 (M4.5.0a 자체는 fix이므로 자산 추가 없음 — multiprocessing.Pool + large-artifact dump 패턴은 공지 lore이지 신규 발견 아님).
 **운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘/fact 영역 클코 의견 먼저. 자가 교정 문구 클코 작성.
-**테스트**: 771 unit + 7 HUNL integration + 2 live (default skip) GREEN.
+**테스트**: 774 unit + 7 HUNL integration + 2 live (default skip) GREEN.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -35,6 +35,89 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 4 M4.5.0a — α + atomic rename, 5/5 success (2026-04-28 새벽)
+
+> 1차 시도 root cause (5×1.1GB 동시 pickle.dump → 16GB unified memory
+> swap 압박 → 30-60min/dump → premature kill 시 truncated) 해결.
+> M4.5.1 mini-pilot 진입 차단 해제.
+
+#### Implementation (~25줄 변경 + 3 신규 test)
+
+* `dump_strategy(..., lock=None)` — atomic write: `<out>.tmp` 쓰고
+  `fsync` 후 `Path.rename` onto `<out>`. Lock 인자 supplied 시 entire
+  dump (write + fsync + rename) inside `with lock:`.
+* `_worker_init(lock)` — spawn-pool initializer가 `Manager.Lock` proxy를
+  module-global `_DUMP_LOCK`로 inject. `_run_seed`가 `dump_strategy`에
+  전달.
+* Main: `mp.Manager() → manager.Lock() → ctx.Pool(initializer=...,
+  initargs=(dump_lock,))`. Manager proxy는 spawn process 경계 통과 OK.
+
+#### Why dump 직렬화 + atomic rename 동시?
+
+| Mechanism | Solves | Diagnostic gain |
+|-----------|--------|-----------------|
+| Manager.Lock dump 직렬화 | swap 압박 (memory root cause) | dump 5min/seed (vs 30-60min 1차) |
+| Atomic `.tmp` → rename | partial-write file 무결성 | truncated `.pkl` 구조적으로 불가능 — `.tmp` 잔존 시 partial 명시 |
+
+직교한 두 invariant. 둘 다 적용해야 1차 incident 재발 방지 + 미래
+incident 진단 용이.
+
+#### Run results (시작 01:20:27, 종료 04:44:47, **wall 204.33 min**)
+
+| seed | n_infosets | train (s) | pickle (MB) | STOP byte |
+|-----:|-----------:|----------:|------------:|----------:|
+| 42   |  8,906,995 |   9395.6  |    1043.6   | `0x2e` ✓ |
+| 123  |  9,575,729 |  10143.0  |    1124.7   | `0x2e` ✓ |
+| 456  |  9,745,694 |  10493.7  |    1142.3   | `0x2e` ✓ |
+| 789  | 10,678,618 |  10887.8  |    1256.1   | `0x2e` ✓ |
+| 1024 |  9,913,484 |  10517.4  |    1161.5   | `0x2e` ✓ |
+
+`tmp` leftover 0개. 1차 시도 5h+ 추정 → α 채택으로 3h 24min (**60-70%
+단축**). Dump 가속 ~7x (1차 30-60min/seed → α 5min/seed 추정).
+
+#### Cross-seed infoset spread (5-seed 측정)
+
+| Round   | mean | min | max | spread | flag |
+|---------|-----:|----:|----:|-------:|------|
+| preflop | 1872 | 1829 | 1961 | 7.05% | WARN >5% |
+| flop    | 446K | 420K | 499K | 17.75% | WARN >5% |
+| turn    | 2.20M | 2.03M | 2.44M | 18.99% | WARN >5% |
+| river   | 7.12M | 6.46M | 7.74M | 17.91% | WARN >5% |
+
+**해석**: 5% threshold는 weak suggestion #1에서 **abstractor 결정성
+검증** hook으로 설정 (abstractor가 비결정적이면 큰 spread). 5-seed
+실측은 모든 round 7-19% — MCCFR external sampling stochasticity가
+abstractor spread를 압도한 결과. abstractor 자체는 결정적
+(`AbstractedHUNLGame(seed=S)`는 동일 seed에서 동일 bucket map). M4.5.1
+entry 시 threshold 정책 재검토 — sampling spread는 별도 metric으로
+분리 (예: 동일 seed × 다른 sampling rng로 abstractor delta 측정).
+
+#### 자산 #22 5번째 instance 정식 등록
+
+1차 시도 premature-kill의 cross-context heuristic transfer (`ls 5초
+stable = process idle`)을 자산 #22 패턴 5번째 instance로 정식 등록.
+
+| # | Phase | Type |
+|---|---|---|
+| Phase 3 #1 | Phase 3 Day 5 | algorithm transfer |
+| M3.3 #8 | Phase 4 M3.3 | use case transfer |
+| M4.0 #9 | Phase 4 M4.0 | fact (stack depth) transfer |
+| M4.4 #10 | Phase 4 M4.4 | fact (API client_pos) transfer |
+| **M4.5.0 #11** | Phase 4 M4.5.0 | **process-state heuristic transfer** |
+
+**일반화 (M4.5.0a 후)**: cross-context transfer 위험 영역이
+algorithm/use-case/fact 외에 **runtime heuristic** (process state,
+file system signal 등 OS-level fact)도 포함. Verification 패턴 일관:
+"이 heuristic이 새 컨텍스트에서도 정답인가?" 질문 명시화.
+
+#### 1차 dir preserved
+
+`experiments/outputs/.../20260427-201222/` (2 valid + 3 truncated pkl
++ README.md) 보존. README에 incident context 명시. 5/5 새 결과는
+`20260428-012027/` 별도 dir.
+
+---
 
 ### Phase 4 M4.5.0 — Strategy persist infra + 1st-attempt 2/5 success (2026-04-28 새벽)
 
