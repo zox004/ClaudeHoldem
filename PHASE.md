@@ -5,13 +5,13 @@
 
 ## 현재 상태
 
-**Phase**: **Phase 4 M3 closure (2026-04-27 09:13)** — Pluribus path 완성 + LBR baseline + 운영 변경.
-**완료**: M0 GameProtocol scaling, M1 HUNL game engine (7 commits), M2 Pluribus path validation (2 commits), **M3.1 PostflopBoardAbstractor + M3.2 6-action grid + M3.3 LBR (2-pass infoset aggregation) + M3.4 production 5-seed × 3-anchor baseline**. **669 unit + 7 HUNL integration GREEN**, ruff src clean, mypy strict clean (25 source files).
-**다음 (M4)**: Slumbot benchmark + training time reality check. M4 진입 시 멘토 약한 의견 받기.
-**Self-audit**: 클코 23 / 멘토 8 (M3 cluster: claude #22 LBR state-level peek, claude #23 test invariant 누락, mentor #8 External Sampling BR framing).
-**M3.4 baseline**: T=1k→T=100k LBR 2.35× 감소 (target 3× 부분 미달, healthy abstraction confirmed). 자세한 결과 본 파일 M3 closure 섹션.
-**운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘 영역 클코 의견 먼저. 자가 교정 문구 클코 작성.
-**테스트**: unit 669 + integration 7 GREEN (LBR 33 + M3.1 32 + M3.2 24 신규).
+**Phase**: **Phase 4 M4.0 closure (2026-04-27 16:08)** — Stack 200 BB Slumbot/ACPC standard + baseline 재training + Scenario B 분류.
+**완료**: M0 GameProtocol scaling, M1 HUNL game engine, M2 Pluribus path validation, M3.1-M3.4 (postflop bucketing + 6-action grid + LBR + first baseline), **M4.0 stack 100→200 BB + 재training (Scenario B: ratio 3.24×, target ≥3× PASS)**. 669 unit + 7 HUNL integration GREEN, ruff src clean, mypy strict clean (25 source files).
+**다음 (M4.1)**: Slumbot HTTP client + ACPC API 어댑터. 200 BB 호환 + 자산 #22 (cross-context transfer verification) hook 적용.
+**Self-audit**: 클코 23 / 멘토 9 (M4.0 mentor #9: 100 BB cash convention → ACPC 200 BB Doyle's Game fact transfer 누락).
+**M4.0 baseline**: T=1k→T=100k LBR **3.24×** 감소 (200 BB), per-seed 100% monotone, healthy abstraction. 100 BB의 2.35× 부족이 stack-depth dependent natural trajectory 영향 — abstraction floor가 아닌 (b) MCCFR budget mechanism 우세 입증.
+**운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘/fact 영역 클코 의견 먼저. 자가 교정 문구 클코 작성. M4.0 후 자산 #22 일반화: "Cross-context transfer requires verification" (algorithm/use-case/fact 3 layer).
+**테스트**: unit 669 + integration 7 GREEN.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -35,6 +35,134 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 4 M4.0 — Stack 100 BB → 200 BB Slumbot/ACPC standard (mentor #9, 2026-04-27)
+
+> 1 commit (`ad34120`) + 1 baseline retraining run (361min wall-clock).
+> M4.1 (Slumbot HTTP client) 진입 차단 해제.
+
+#### Mentor #9 자가 교정 (M4 진입 시 발견, 클코 web 검증)
+
+**오류**: `docs/phase4_hunl_design.md` §9 fact statement
+> "**100 BB** (mentor decision). Standard heads-up cash. Slumbot 2017 /
+> DecisionHoldem 2022 use 100 BB. Compatibility for Phase 4 M4
+> benchmark."
+
+**본질**: 사실과 반대. Slumbot 2019 (slumbot.com / Eric Jackson
+slumbot2019 repo) 및 ACPC 2017+ 표준 모두 **200 BB Doyle's Game**
+(`SMALL_BLIND=50, BIG_BLIND=100, STACK_SIZE=20000` chips → 200 BB).
+멘토가 두 맥락 conflate: (a) online cash 100 BB convention, (b) ACPC
+benchmark 200 BB Doyle's Game. (a)는 사실이지만 (b)는 반대 사실 —
+verification 없이 단정형 fact statement.
+
+**발견**: 클코 M4 진입 시 Slumbot API 사실 점검 (web search) 중
+stack=20000 chips 발견 → repo + paper cross-check. 멘토 자체 web
+fact-check (DeepStack / GTO Wizard / Supremus / AIPT / DecisionHoldem)
+모두 200 BB 명시 confirm. **mentor 단독 발견 0/9 일관**.
+
+**오류 패턴 3번째 instance** (같은 메타 패턴):
+
+| # | Phase | 발견 | 종류 |
+|---|---|---|---|
+| Phase 3 #1 | Phase 3 Day 5 | CFR+ → Vanilla 비교 reference | algorithm transfer |
+| M3.3 #8 | Phase 4 M3.3 | Lanctot §3.3 → BR evaluation | use case transfer |
+| **M4.0 #9** | Phase 4 M4.0 | "100 BB == ACPC 표준" | **fact (domain) transfer** |
+
+→ 모두 cross-context transfer + verification 누락이라는 **공통 메타 패턴**.
+
+**reframe**: stack 100 BB → 200 BB. `STARTING_STACK_BB=200,
+STARTING_STACK_CHIPS=400`, bankroll 800. M3 baseline 재training 필수 (M3 strategy는 100 BB tree 학습됨). M4.1 Slumbot adapter는 chip granularity ×50 multiplier로 호환.
+
+**mentor 누계 8 → 9.**
+
+#### 자산 #22 일반화 (M4.0)
+
+**기존 (M3.3 등록 시)**: Algorithm pseudocode ≠ implementation, Lemma/bound test invariant audit hook.
+
+**일반화 (M4.0 후)**: **Cross-context transfer requires verification.** 한 컨텍스트에서 정착된 정답 (algorithm / use-case / fact)을 다른 컨텍스트로 옮길 때 verification 누락은 시스템적 위험. 3건 누적:
+
+- **algorithm transfer**: CFR+ baseline → Vanilla 비교 적합성 검증 누락 (Phase 3 #1)
+- **use case transfer**: Lanctot §3.3 sampling scheme → BR evaluation 적합성 검증 누락 (M3.3 #8)
+- **fact (domain) transfer**: heads-up cash 100 BB convention → ACPC benchmark 적합성 검증 누락 (M4.0 #9)
+
+**적용 hook**:
+- Algorithm transfer: paper의 use-case + assumption 명시 verify
+- Use case transfer: estimator/algorithm semantics use-case 의존성 명시 verify
+- Fact transfer: web/paper search로 fact statement cross-check
+
+자산 카탈로그 위치 변경 없음 (#22 그대로, 일반화 갱신).
+
+#### 운영 변경 효과 추적 (M3.3 → M4.0 사이)
+
+**M3.3 ~ M4.0 운영 변화**:
+
+1. **클코 push back 정착 evidence**: M3.3 외부 sampling BR (mentor #8) 클코 강한 push back으로 LBR 채택. M4.0 stack fact (mentor #9) 클코 web 검증으로 발견. 두 instance 연속.
+
+2. **멘토 fact-check 패턴 신호** (M4.0 발견 직후): 멘토가 자체 web search로 confirm. 단순 "내 의견" 아닌 "verified fact transfer" 패턴 진입. mentor #1-7 (Phase 1~3) 시기 fact 검증 없이 framing → mentor #8-9 (Phase 4 M3-M4) 클코 push back 후 자체 verify로 전환.
+
+3. **클코 web 검증 = 추가 audit layer**: M3.3 (LBR algorithm web 확인), M4.0 (Slumbot stack web 확인) — 클코가 독립적으로 external truth 확인. mentor 단독 framing 위험을 상쇄. 자산 #22 일반화의 자연스러운 외연.
+
+4. **Tone 전환 정당성 metric**: mentor 단독 발견 0/9 일관 → 운영 변경 정당성 강화.
+
+#### M4.0 Baseline 재training 결과 (5-seed × 3-anchor, 200 BB)
+
+**Setup**: AbstractedHUNLGame(n_buckets=50, n_trials=10000, postflop_mc_trials=300, postflop_threshold_sample_size=10000) + STARTING_STACK_BB=200. MCCFR ε=0.05, LBR n_samples=2000 paired.
+
+**LBR T-trend** (5-seed mean ± combined SE):
+
+| T | mean (chips) | combined SE | mean (mbb/g) | per-seed | SE/mean |
+|---|---|---|---|---|---|
+| 1,000 | +18.9115 | 1.5554 | 9455.7 | 19.57, 19.03, 21.18, 20.16, 14.62 | 8% |
+| 10,000 | +12.5229 | 1.5851 | 6261.4 | 17.58, 9.96, 11.57, 12.43, 11.08 | 13% |
+| 100,000 | +5.8392 | 0.8808 | 2919.6 | 7.65, 4.90, 6.10, 4.49, 6.06 | 15% |
+
+**Decade ratios**:
+
+| Decade | 200 BB (M4.0) | 100 BB (M3.4) | Δ |
+|---|---|---|---|
+| T=1k → T=10k | **1.51×** | 1.21× | +25% |
+| T=10k → T=100k | **2.14×** | 1.94× | +10% |
+| T=1k → T=100k cumulative | **3.24×** | 2.35× | +38%; **target ≥3× PASS** (M3.4 부분 미달) |
+
+**Bucket occupancy** (5-seed sum):
+
+| Round | Pattern | Total | max | min | empty |
+|---|---|---|---|---|---|
+| preflop | balanced | 9,609 | 2.1% | 1.89% | 0 |
+| flop | sparse_acceptable | 2.39M | 2.4% | 0.75% | 0 |
+| turn | sparse_acceptable | 11.81M | 2.4% | 0.77% | 0 |
+| river | sparse_acceptable | 38.60M | 2.5% | 0.95% | 0 |
+
+→ **Healthy abstraction 보존** + per-seed monotone 100%.
+
+**Wall-clock**: 361min (200 BB 6h, 100 BB 221min × 1.63). Deeper stack tree → MCCFR traversal cost 63% 증가.
+
+#### Audit 분류: **Scenario B** (사전 정의)
+
+> **B** — Ratio 더 큼 (3×+) → deep stack effect, M4.1 즉시 진입 + narrative 갱신
+
+**해석**:
+- 200 BB tree에서 더 강한 convergence — deeper stack = 더 많은 betting depth 학습 기회
+- 100 BB tree는 더 빠르게 saturate (작은 ratio). M3.4 ≥3× 부족이 abstraction floor가 아닌 **stack-depth dependent natural trajectory**
+- (b) MCCFR budget mechanism 우세, (a) abstraction floor mechanism 약함 — 200 BB에서 ≥3× 통과로 abstraction이 stack-robust 입증
+
+**M3.4 mechanism attribution 갱신** (M3.4 closure 시 3-mechanism 단정 거부했던 부분):
+- (a) abstraction floor: **약함** (200 BB에서도 healthy + ratio 통과)
+- (b) MCCFR budget: **우세** — 200 BB에서 deeper learning trajectory가 ratio 더 크게
+- (c) LBR rollout floor: 미확정, M4.1 Slumbot benchmark에서 정량
+
+**Phase 4 영향**: positive — abstraction 변경 불필요, M4.1 즉시 진입.
+
+**M4 진척**:
+- ✅ M4.0 stack reconfigure + baseline 재training
+- ⏭️ M4.1 Slumbot HTTP client + ACPC API
+- ⏭️ M4.2 Action protocol adapter
+- ⏭️ M4.3 Benchmark harness
+- ⏭️ M4.4 Pilot run (100 hand sanity)
+- ⏭️ M4.5 Production run (10k+ hand)
+- ⏭️ M4.6 결과 분석 + Phase 4 closure
+
+---
 
 ### Phase 4 M3 — Pluribus path 완성 + LBR baseline + 운영 변경 (2026-04-26 → 2026-04-27)
 
