@@ -290,9 +290,18 @@ class SlumbotHarness:
         game: AbstractedHUNLGame,
         strategy_fn: StrategyFn,
         rng: np.random.Generator,
+        *,
+        dispatch_mode: str = "deterministic",
+        dispatch_rng: np.random.Generator | None = None,
     ) -> HandRecord:
         """Drives one full hand against Slumbot. See module docstring for
         the loop / cross-check contract.
+
+        ``dispatch_mode`` selects the M4.5.2 A/B arm: ``"deterministic"``
+        is the M4.2 ``nearest_abstracted_bet_size`` baseline,
+        ``"probabilistic"`` is Schnizlein 2009 soft translation.
+        ``dispatch_rng`` is required for probabilistic mode (paper §3.2
+        internal-consistency: caller seeds it per hand).
         """
         first = self._retry_post(self.client.new_hand)
         deal = _reconstruct_deal(
@@ -309,7 +318,8 @@ class SlumbotHarness:
         # Loop while server signals "your turn" (winnings is None).
         while last_response.winnings is None:
             state = replay_sequence(
-                game, deal, last_action_seq, client_pos
+                game, deal, last_action_seq, client_pos,
+                dispatch_mode=dispatch_mode, rng=dispatch_rng,
             )
             if state.is_terminal:
                 raise SlumbotError(
@@ -329,7 +339,8 @@ class SlumbotHarness:
 
         # Hand has terminated (winnings present).
         final_state = replay_sequence(
-            game, deal, last_action_seq, client_pos
+            game, deal, last_action_seq, client_pos,
+            dispatch_mode=dispatch_mode, rng=dispatch_rng,
         )
         if not final_state.is_terminal:
             raise SlumbotError(

@@ -54,6 +54,9 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
+import numpy as np
+
+from poker_ai.eval.probabilistic_dispatch import bucket_weights, sample_bucket
 from poker_ai.eval.slumbot_client import chip_from_slumbot, chip_to_slumbot
 from poker_ai.games.hunl_abstraction import (
     AbstractedHUNLAction,
@@ -222,13 +225,25 @@ def encode_action(
 def ingest_opponent_token(
     state: AbstractedHUNLState,
     token: SlumbotActionToken,
+    *,
+    dispatch_mode: str = "deterministic",
+    rng: np.random.Generator | None = None,
 ) -> AbstractedHUNLState:
     """Advances the state given a Slumbot wire token.
 
     For ``b<X>``: converts X / 50 to our chips, finds legal abstracted
     BET sizes via :func:`compute_size` over each legal BET enum, then
-    routes through :func:`nearest_abstracted_bet_size` and dispatches
-    the matching :class:`AbstractedHUNLAction`.
+    dispatches:
+
+    * ``dispatch_mode="deterministic"`` (M4.2 default) —
+      :func:`nearest_abstracted_bet_size` snaps to the closest legal
+      bucket (larger-size tie-break).
+    * ``dispatch_mode="probabilistic"`` (M4.5.2 Schnizlein 2009) —
+      :func:`bucket_weights` builds a 2-bucket distribution from the
+      paper Eq. 5/6 geometric similarity, then :func:`sample_bucket`
+      picks one bucket using ``rng``. ``rng`` is required in this
+      mode and should be seeded per hand for paper §3.2 internal-
+      consistency invariant.
 
     For ``f`` / ``c`` / ``k``: direct enum mapping (``k`` collapses to
     CALL since our state machine encodes "check" as a no-money CALL).
@@ -256,8 +271,26 @@ def ingest_opponent_token(
             "Slumbot 'b' token received but no abstracted BET legal here"
         )
     our_chip = chip_from_slumbot(token.bet_to_slumbot_chips)
-    nearest_size = nearest_abstracted_bet_size(our_chip, list(candidates.keys()))
-    return state.next_state(candidates[nearest_size])
+    if dispatch_mode == "deterministic":
+        chosen_size = nearest_abstracted_bet_size(
+            our_chip, list(candidates.keys())
+        )
+    elif dispatch_mode == "probabilistic":
+        if rng is None:
+            raise ValueError(
+                "dispatch_mode='probabilistic' requires rng "
+                "(paper §3.2 internal-consistency: seed per hand)"
+            )
+        weights = bucket_weights(
+            raw_chip=our_chip, legal_sizes=list(candidates.keys())
+        )
+        chosen_size = sample_bucket(weights, rng)
+    else:
+        raise ValueError(
+            f"dispatch_mode must be 'deterministic' or 'probabilistic'; "
+            f"got {dispatch_mode!r}"
+        )
+    return state.next_state(candidates[chosen_size])
 
 
 # =============================================================================
@@ -268,6 +301,9 @@ def replay_sequence(
     deal: tuple[int, ...],
     sequence: str,
     client_pos: int,
+    *,
+    dispatch_mode: str = "deterministic",
+    rng: np.random.Generator | None = None,
 ) -> AbstractedHUNLState:
     """Replays a full Slumbot action sequence onto a fresh state.
 
@@ -295,7 +331,9 @@ def replay_sequence(
             if state.is_terminal:
                 return state
             parsed = parse_action_token(token_str)
-            state = ingest_opponent_token(state, parsed)
+            state = ingest_opponent_token(
+                state, parsed, dispatch_mode=dispatch_mode, rng=rng,
+            )
     # All-in roll-out: when both stacks reach 0 mid-hand, Slumbot encodes
     # the resulting "no-action" remaining streets as trailing slashes
     # (e.g. ``b20000c///``). Our state machine still expects the rounds

@@ -29,6 +29,12 @@ strategy_dir: experiments/outputs/phase4_m45_train_strategies/20260428-012027
 n_hands: 1000
 seeds: [42, 123, 456, 789, 1024]
 
+# M4.5.2 dispatch mode. "deterministic" = M4.2 nearest-bucket baseline
+# (M4.5.1 smoke baseline); "probabilistic" = Schnizlein 2009 §3.2
+# soft translation (paper Eq. 5/6, sample 1 path with per-hand seeded
+# rng for internal-consistency invariant).
+dispatch_mode: deterministic
+
 # Pacing (claude push-back #5: M4.4 single-thread 1s baseline preserved
 # across 5 threads → effective 5 req/s total).
 hand_sleep_s: 1.0

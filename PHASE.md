@@ -5,13 +5,13 @@
 
 ## 현재 상태
 
-**Phase**: **Phase 4 M4.5.1 closure — smoke (25 hand) 결과로 path B 결정 (2026-04-28 아침)**. spec 1k full pilot → smoke 결과 통계적으로 robust (40% divergence × Wilson CI lower 22.5% > 15% threshold) → 1k full execute 안 함. Mechanism unambiguous (replay-divergence 10/10). M4.5.2 Schnizlein 2009 진입.
-**완료**: M0/M1/M2 + M3.1-M3.4 + M4.0-M4.4 + M4.5.0/0a + **M4.5.1 (script + 12 unit tests + 25-hand smoke)**. **786 unit GREEN** (774 + 12 신규), ruff/mypy clean (28 src files).
-**다음 (M4.5.2)**: Schnizlein 2009 §3 probabilistic state translation — inference-time substitution (re-train 회피). 100-hand A/B mid-pilot로 deterministic dispatch (M4.2) vs probabilistic dispatch divergence 비교 → 10k production 결정.
-**Self-audit**: **클코 26 / 멘토 11** — M4.5.0a closure에서 mentor #11 (5% threshold metric 의도-실제 mismatch, abstractor determinism vs MCCFR sampling stochasticity 섞은 신호) + M4.5.1 smoke에서 claude #26 (`state.infoset_key()` parens — `@property` 형식 source verification 누락, 자산 #22 6번째 instance). 둘 다 verification-after-correction cluster.
-**자산 카탈로그**: 24 (M4.5.1는 자산 #22 cluster 누적 강화만, 신규 등록 없음).
+**Phase**: **Phase 4 M4.5.2 closure — Schnizlein 2009 inference-time substitution 효과 없음 → path (iii) deterministic 10k production 진입 (2026-04-28 점심)**. A/B mid-pilot 100 hand × 5 seed × 2 mode: A (deterministic) 19.2% vs B (probabilistic Schnizlein) 21.6%, Wilson CI 겹침 → 통계적 동등. **mentor #12 정식 등록 (paper-metric vs our-metric applicability mismatch, 자산 #22 7번째 instance)**.
+**완료**: M0/M1/M2 + M3.1-M3.4 + M4.0-M4.4 + M4.5.0/0a + M4.5.1 + **M4.5.2 (probabilistic_dispatch module + 17 unit tests + A/B mid-pilot 100×5×2)**. **803 unit GREEN** (786 + 17 신규), ruff/mypy clean (29 src files, +1 신규 module).
+**다음 (M4.5.3)**: Production 10k deterministic vs Slumbot. ~95min wall. 19% divergence 수용 → ~8100 hand valid → winrate CI ~±200 mbb/hand 예상. Phase 4 본질 deliverable (winrate measurement) 달성.
+**Self-audit**: **클코 26 / 멘토 12** — mentor #12 (Schnizlein 2009 effect 가정: paper exploitability metric → our replay-divergence metric, applicability 검증 누락). cluster: mentor #11 (measurement priority) + mentor #12 (measurement applicability), 둘 다 measurement-definition 영역.
+**자산 카탈로그**: 24 (자산 #22 cluster 7번째 instance 누적, 신규 자산 등록 없음). **자산 #11 (sample size effect) 강화** — n=25 smoke에서 harness-desync mode 0이었으나 n=500에서 11/96 발견.
 **운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘/fact 영역 클코 의견 먼저. 자가 교정 문구 클코 작성.
-**테스트**: 786 unit + 7 HUNL integration + 2 live (default skip) GREEN.
+**테스트**: 803 unit + 7 HUNL integration + 2 live (default skip) GREEN.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -35,6 +35,175 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 4 M4.5.2 — Schnizlein 2009 A/B mid-pilot, no effect, deterministic 채택 (2026-04-28 점심)
+
+> Schnizlein 2009 §3.2-§4 (paper Eq. 5/6 정확 식) inference-time
+> substitution 구현. Tier 1+2 only (no re-train, M4.5.0a 5 pickle
+> 재사용). 100-hand × 5-seed × 2 mode A/B mid-pilot 결과 deterministic
+> 19.2% vs probabilistic 21.6% 통계적 동등 → **path B (Schnizlein)
+> 가정 무효, path (iii) deterministic production 채택**.
+
+#### Paper formula verification (자산 #22 #6 직후 fact 검증 명확 통과)
+
+자산 #22 #6 instance (`infoset_key()` parens, M4.5.1) 직후 같은
+패턴 재발 위험 인지. WebSearch + WebFetch + pypdf 추출로 paper 본문
+직접 확인:
+
+* Schnizlein, Bowling, Szafron 2009 — "Probabilistic State Translation
+  in Extensive Games with Large Action Sets" (IJCAI), Section 3.2 +
+  Section 4
+* Eq. 5: $S(h, a, a_1) = (b_1/b - b_1/b_2) / (1 - b_1/b_2)$
+* Eq. 6: $S(h, a, a_2) = (b/b_2 - b_1/b_2) / (1 - b_1/b_2)$
+* Boundary: $b = b_1 \to (1, 0)$, $b = b_2 \to (0, 1)$, $b = \sqrt{b_1 b_2} \to S_1 = S_2 = 1/3$ (normalised 0.5/0.5)
+* Sampling form: paper §3.2 final paragraph "non-exponential method, hash
+  of game ID seed" — 우리 구현 정확히 일치 (`np.random.default_rng((seed, hand_idx))`)
+
+#### Implementation (~250 LOC + 17 TDD tests)
+
+* `src/poker_ai/eval/probabilistic_dispatch.py` (신규)
+  * `soft_similarity(b, b1, b2) → (S1, S2)` — paper Eq. 5/6, edge
+    case `b ∈ {b1, b2}` 명시 처리
+  * `bucket_weights(raw_chip, legal_sizes) → dict[size, prob]` — 두
+    인접 bucket normalised weights, `raw_chip ≤ min` / `≥ max` /
+    `== legal` singleton fallback
+  * `sample_bucket(weights, rng) → bucket_size` — singleton
+    short-circuit (no rng consumed)
+* `slumbot_protocol.ingest_opponent_token` + `replay_sequence`에
+  `dispatch_mode: "deterministic" | "probabilistic"` + `rng` 추가
+  (backward-compat: default deterministic, rng=None)
+* `slumbot_harness.SlumbotHarness.play_one_hand`에 dispatch_mode
+  propagation
+* `experiments/phase4_m45_pilot.py`에 per-hand dispatch_rng
+  `np.random.default_rng((seed, i))` (paper internal-consistency
+  invariant — A/B 같은 (seed, hand_idx)에서 같은 sampled abstract path)
+* `experiments/conf/phase4_m45_pilot.yaml`에 `dispatch_mode:
+  deterministic` flag
+
+#### Sub-pilot wall-clock & RSS
+
+| Arm | Mode | wall | post-load RSS | game setup (max) |
+|-----|------|-----:|--------------:|-----------------:|
+| A | deterministic | 30.41 min | 6067 MB | 1576s |
+| B | probabilistic | 30.28 min | 7367 MB | 1567s |
+
+Setup 25min × 2 = 50min × 1 cost (mid-pilot per arm). Setup
+overhead mitigation (m1 disk cache / m2 process pool) 적용 X — 우선
+deterministic 그대로 진행 (M4.5.2 scope 안 넓힘).
+
+#### A/B 결과 (정직 기록, 100 hand × 5 seed each arm)
+
+| Arm | divergence | replay-div | harness-desync | strategy-miss | winrate (mbb/hand) |
+|-----|----------:|-----------:|---------------:|--------------:|-------------------:|
+| A (deterministic, M4.2)         | **19.20%** (96/500) | 85 | 11 | 17 | **+476 ±1212** |
+| B (probabilistic, Schnizlein)   | **21.60%** (108/500) | 101 | 7 | 22 | -1087 ±2932 |
+
+**Wilson 95% CI**:
+- A: [16.0%, 22.9%]
+- B: [18.2%, 25.4%]
+- 두 CI **겹침** → 통계적 동등 (Schnizlein 효과 없음)
+
+per-seed (deterministic): 18%, 18%, 16%, 20%, 24% (mean 19.2%)
+per-seed (probabilistic): 21%, 17%, 24%, 17%, 29% (mean 21.6%)
+
+#### mentor #12 자가 교정 — Schnizlein effect 가정의 paper-metric vs our-metric mismatch (자산 #22 7번째 instance)
+
+**오류**: M4.4 closure 시점 자산 #24 candidate (Schnizlein 2009
+probabilistic state translation) 정식 등록 + M4.5.1 closure 시점
+"Schnizlein urgency confirmed". 두 instance 모두 paper의 효과
+(exploitability 감소)가 우리 측정 metric (replay-divergence rate)에서
+도 발현될 것이라 가정.
+
+**본질**: 사실과 다름. Paper §3.2 본문 — Schnizlein 효과는 *opponent
+exploitation 감소* (exploitability metric, abstract game 내 best-response
+대비). Replay-divergence는 *우리 abstracted state의 다음 server raw
+action legal-mismatch* — opponent의 raw action 자체가 dispatch mode
+변경으로 변하지 않으니 줄어들 이유 없음. Paper §3.2 final paragraph도
+"all guarantees of optimality are lost" 인정.
+
+**오류 패턴 7번째 instance** (자산 #22 일관, mentor #11과 동일 cluster):
+
+| # | Phase | Type |
+|---|---|---|
+| Phase 3 #1 | Phase 3 Day 5 | algorithm transfer |
+| M3.3 #8 | Phase 4 M3.3 | use case transfer |
+| M4.0 #9 | Phase 4 M4.0 | fact (stack depth) transfer |
+| M4.4 #10 | Phase 4 M4.4 | fact (API client_pos) transfer |
+| M4.5.0 #11 | Phase 4 M4.5.0 | process-state heuristic transfer |
+| M4.5.1 #26 | Phase 4 M4.5.1 | internal API fact transfer (claude) |
+| **M4.5.2 #12** | Phase 4 M4.5.2 | **paper-metric vs our-metric applicability transfer (mentor)** |
+
+**일반화 (M4.5.2 후)**: cross-context transfer 위험 영역에 **measurement
+applicability**가 추가됨. paper의 metric M_paper 효과를 자체 metric
+M_ours로 직접 transfer 시 verification 누락 위험. Paper의 metric
+정의 + 우리 metric 정의 + 두 metric 사이 인과 chain 명시 필요.
+
+**Cluster (mentor #11 + #12 = measurement-definition cluster)**:
+- #11: 5% spread threshold metric — 의도 (abstractor 결정성) ≠ 실제
+  측정 (MCCFR sampling stochasticity 포함). measurement *priority*
+  영역
+- #12: Schnizlein effect 가정 — paper metric (exploitability) ≠ our
+  metric (replay-divergence). measurement *applicability* 영역
+- 둘 다 measurement 정의 단계 verification 누락 패턴
+
+**누계: claude 26 / mentor 12.** mentor solo 발견 0/12 일관 (자가 교정
+2번째). 운영 변경 정당성 강화.
+
+#### harness-desync mode 신규 발견 — 자산 #11 (sample size effect) 강화
+
+M4.5.1 smoke (n=25) 시: harness-desync 0/25 → "mechanism homogeneous
+(replay-divergence 10/10)" 결론. M4.5.2 mid-pilot (n=500) 시:
+harness-desync 11/96 (A) + 7/108 (B) — 9-11% of failures.
+
+**자산 #11 (sample size effect) 정신 연장**: small-n에서 mode 분포
+generalize 안 됨. 운영 lesson — *path 결정에 sample size 충분성 명시*.
+M4.5.1 smoke "n=25 sufficient" 판단은 *aggregate divergence rate
+statistical robustness* 영역 정확했지만 *failure mode mix
+representativeness* 영역에서는 부족. metric 차원이 다름.
+
+#### Mechanism attribution 4-mode 확장 발의 (M4.5.2 lesson)
+
+기존 3-mode (replay-divergence / harness-desync / transport / unknown)
+에 **(d) action abstraction granularity** 추가 발의:
+
+| Mode | Source | Counter |
+|------|--------|---------|
+| (a) replay-divergence | M4.2 nearest-bucket dispatch (또는 M4.5.2 probabilistic, 둘 다 효과 동등) | `ValueError` from `replay_sequence` |
+| (b) harness-desync | state-machine desync (M4.5.2에서 신규 발견) | `SlumbotError` |
+| (c) transport | HTTP retry exhaustion | `requests.HTTPError` |
+| (d) **action abstraction granularity** (Phase 5 cluster) | 6-action grid 부족 — server raw raise pattern을 close enough bucket으로 매핑 불가 | replay-divergence 의 **subtype** (mechanism은 action grid coarse) |
+
+(a)가 dispatch mode invariant라는 M4.5.2 finding은 (a) → (d)
+dependency 시사. Phase 5 진입 시 action grid 6 → 12 buckets 우선
+순위 강화.
+
+#### Phase 5 우선순위 갱신 (M4.5.2 lesson)
+
+Phase 5 abstraction precision cluster 우선순위:
+
+| 우선 | Cluster member | Reason |
+|------|----------------|--------|
+| 1 | **(ii) Finer action grid (6 → 12 buckets)** | M4.5.2 lesson — replay-divergence dispatch-invariant이라 action grid coarse가 root cause |
+| 2 | distribution-aware K-means card abstractor | 자산 #24 cluster 원래 항목 |
+| 3 | EMD distance metric for postflop | 자산 #24 cluster 원래 항목 |
+| (보류) | Schnizlein 2009 train-time integration (Tier 3) | M4.5.2 효과 없음 검증 — paper도 효과 보장 안 함 |
+
+#### Path 재결정 — (iii) deterministic 10k production 채택
+
+원래 path 분기 정의 ≥ 15% → "Schnizlein 도입 후 재pilot" 가정 무효
+검증. 신규 path 옵션:
+
+| 옵션 | reject reason or accept rationale |
+|------|-----------------------------------|
+| (i) Tier 3 MCCFR re-train + Schnizlein | reject — paper 보장 없음, 2-3 세션 cost |
+| (ii) Finer action grid (6 → 12 buckets) | Phase 5 cluster 1순위로 이동 (M4.5.2 lesson 반영) |
+| **(iii) Production 10k deterministic** | **accept** — 19% divergence 수용 = 8100 hand valid winrate, Phase 4 본질 deliverable 달성 |
+| (iv) Phase 4 closure 직진 (winrate 측정 안 함) | reject — Phase 4 본질 deliverable 누락 |
+
+(iii) 진행: ~95min wall, A-arm setup pickle cache 검토 (m1 mitigation
+유효 시 setup 5min로 가속).
+
+---
 
 ### Phase 4 M4.5.1 — Trained-strategy mini-pilot smoke decided path B (2026-04-28 아침)
 

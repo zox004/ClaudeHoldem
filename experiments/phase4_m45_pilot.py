@@ -226,10 +226,20 @@ def _run_seed(
     win_chips: list[int] = []
     failure_tracebacks: list[str] = []
 
+    dispatch_mode = str(cfg_dict.get("dispatch_mode", "deterministic"))
+
     pilot_start = time.perf_counter()
     for i in range(n_hands):
+        # Per-hand deterministic dispatch rng (paper §3.2 internal
+        # consistency). Same (seed, hand_idx) → same sampled abstract
+        # path across A/B mode comparison runs.
+        dispatch_rng = np.random.default_rng((seed, i))
         try:
-            rec: HandRecord = harness.play_one_hand(game, strategy_fn, rng)
+            rec: HandRecord = harness.play_one_hand(
+                game, strategy_fn, rng,
+                dispatch_mode=dispatch_mode,
+                dispatch_rng=dispatch_rng,
+            )
             win_chips.append(rec.our_utility_chips)
         except Exception as exc:   # noqa: BLE001 — intentional broad catch
             mode = classify_failure_mode(exc)
