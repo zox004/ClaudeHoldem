@@ -5,13 +5,13 @@
 
 ## 현재 상태
 
-**Phase**: **Phase 4 M4.5.0a closure — strategy persist 5/5 success (2026-04-28 새벽)**. α (Manager.Lock dump 직렬화) + atomic tmp→rename 적용 후 5/5 STOP-opcode validated. Wall total **204.33 min (3h 24min)** — 1차 시도 추정 5h+의 60-70%, dump 가속 7x.
-**완료**: M0/M1/M2 + M3.1-M3.4 + M4.0-M4.4 + **M4.5.0/0a (script + 12 unit tests + 5 valid pickle)**. **774 unit GREEN** (762 + 12 신규), ruff/mypy clean (28 src files).
-**다음 (M4.5.1)**: 1k mini-pilot 5-seed parallel vs Slumbot. Strategy load → uniform-mask 대신 trained policy 사용 → divergence rate 비교 (uniform baseline 17%).
-**Self-audit**: 클코 25 / 멘토 10 (변화 없음). M4.5.0 1차 premature-kill은 **자산 #22 cross-context-transfer 5번째 instance 정식 등록 (M4.5.0a closure 시점)** — "ls 5초 stable = process idle" cross-context heuristic transfer without verification.
-**자산 카탈로그**: 24 (M4.5.0a 자체는 fix이므로 자산 추가 없음 — multiprocessing.Pool + large-artifact dump 패턴은 공지 lore이지 신규 발견 아님).
+**Phase**: **Phase 4 M4.5.1 closure — smoke (25 hand) 결과로 path B 결정 (2026-04-28 아침)**. spec 1k full pilot → smoke 결과 통계적으로 robust (40% divergence × Wilson CI lower 22.5% > 15% threshold) → 1k full execute 안 함. Mechanism unambiguous (replay-divergence 10/10). M4.5.2 Schnizlein 2009 진입.
+**완료**: M0/M1/M2 + M3.1-M3.4 + M4.0-M4.4 + M4.5.0/0a + **M4.5.1 (script + 12 unit tests + 25-hand smoke)**. **786 unit GREEN** (774 + 12 신규), ruff/mypy clean (28 src files).
+**다음 (M4.5.2)**: Schnizlein 2009 §3 probabilistic state translation — inference-time substitution (re-train 회피). 100-hand A/B mid-pilot로 deterministic dispatch (M4.2) vs probabilistic dispatch divergence 비교 → 10k production 결정.
+**Self-audit**: **클코 26 / 멘토 11** — M4.5.0a closure에서 mentor #11 (5% threshold metric 의도-실제 mismatch, abstractor determinism vs MCCFR sampling stochasticity 섞은 신호) + M4.5.1 smoke에서 claude #26 (`state.infoset_key()` parens — `@property` 형식 source verification 누락, 자산 #22 6번째 instance). 둘 다 verification-after-correction cluster.
+**자산 카탈로그**: 24 (M4.5.1는 자산 #22 cluster 누적 강화만, 신규 등록 없음).
 **운영 변경 (2026-04-26)**: 멘토 강한 권고 → 약한 제시 톤 전환. 통계/알고리즘/fact 영역 클코 의견 먼저. 자가 교정 문구 클코 작성.
-**테스트**: 774 unit + 7 HUNL integration + 2 live (default skip) GREEN.
+**테스트**: 786 unit + 7 HUNL integration + 2 live (default skip) GREEN.
 
 ## 다음 할 일 (Next Action) — Phase 2 Week 1 (Leduc 엔진 + CFR+)
 
@@ -35,6 +35,139 @@
 - [ ] (선택) Outcome Sampling MCCFR 비교
 
 ## 지금까지 한 일 (Done)
+
+### Phase 4 M4.5.1 — Trained-strategy mini-pilot smoke decided path B (2026-04-28 아침)
+
+> Spec: 1k hand × 5-seed × 5-thread parallel. Executed: smoke
+> (5 hand × 5-seed = 25 hand) result statistically sufficient
+> (Wilson 95% CI lower 22.5% > 15% threshold), mechanism homogeneous
+> (replay-divergence 10/10) → 1k full skipped, M4.5.2 Schnizlein
+> 진입 즉시. Spec deviation 정직 기록 — robust evidence 시
+> spec literal 모든 step 안 따라도 됨 lesson.
+
+#### Pre-pilot push-back (4 strong + 3 weak, all user-confirmed)
+
+| # | Push-back | Spec gap source |
+|---|-----------|-----------------|
+| 1 | Strategy lookup miss handling 분리 metric (uniform fallback + count separate from divergence) | spec 누락 |
+| 2 | Mechanism attribution 사전 정의 (replay-div / harness-desync / transport / unknown 3+1 mode) | spec circular |
+| 3 | Strategy dir 명시적 path (Hydra interpolation 회피) | spec fragile |
+| 4 | Winrate primary→secondary (divergence가 path 결정 metric, winrate는 informational + CI) | mentor #12 후보 (cluster with #11) |
+| 5 | hand_sleep_s=1.0 (5-thread × 0.5s = 10 req/s 위험) | weak |
+| 6 | ThreadPoolExecutor (vs multiprocessing.Pool, I/O bound + GIL release path) | weak |
+| 7 | RSS weak monitor | weak |
+
+#### Implementation (~330 LOC + 12 TDD tests)
+
+* `experiments/phase4_m45_pilot.py` + Hydra config
+* `StrategyWithMissCounter` — `dict[str, np.ndarray]` wrapper, on `KeyError` returns uniform 6-vec + counts (`n_misses`, `n_unique_missed_keys`)
+* `classify_failure_mode(exc)` — `SlumbotError → harness-desync` / `requests.HTTPError → transport` / `ValueError → replay-divergence` / else `unknown`
+* `decide_path(divergence_rate)` — `< 5% → A` / `5-15% → ambiguous` / `≥ 15% → B`
+* ThreadPoolExecutor 5-thread, per-thread `AbstractedHUNLGame` + `SlumbotClient` (token isolation)
+
+#### Smoke run (5 seed × 5 hand, 시작 08:11:31, 종료 08:41:51)
+
+| Metric | Value |
+|--------|-------|
+| Wall total | **25.82 min** |
+| game setup phase (GIL-bound, sequential effective) | ~25 min |
+| hand phase (parallel I/O) | ~15 s |
+| post-load RSS | 7111 MB (16 GB system safe) |
+| n_attempted / n_success | 25 / 15 |
+| **divergence rate** | **40.00%** (Wilson 95% CI [22.5%, 59.6%]) |
+| dominant failure mode | **replay-divergence (10/10, 100%)** |
+| strategy-miss | **0** (모든 hand에서 hit) |
+| transport / harness-desync / unknown | 0 / 0 / 0 |
+| winrate (secondary) | +2133 mbb/hand, 95% CI ±3670 (informational) |
+| **path decision** | **B** |
+
+per-seed: seed42=60% (3/5), seed123=40% (2/5), seed456=20% (1/5),
+seed789=20% (1/5), seed1024=60% (3/5).
+
+#### M4.4 → M4.5.1 비교 (uniform → trained)
+
+| Strategy | n | divergence | dominant mode |
+|----------|---|------------|---------------|
+| M4.4 uniform | 30 | 17% | replay-divergence (5/5) |
+| M4.5.1 trained | 25 | **40%** (2.4x) | replay-divergence (10/10) |
+
+**핵심 finding**: trained strategy가 Slumbot raise pattern을 *더 잘
+따라가* abstracted-bucket dispatch divergence가 2.4x 발동. M4.4
+closure (asset #24 candidate Schnizlein 2009 정식 등록) 시점 예측
+"trained strategy may push divergence higher" 정확히 적중. Schnizlein
+2009 도입 urgency confirmed.
+
+#### claude self-audit #26 — `state.infoset_key()` parens (자산 #22 6번째 instance)
+
+**오류**: M4.5.1 script + test 모두 `state.infoset_key()` method
+call 형식 사용. Smoke 첫 실행에서 `TypeError: 'str' object is not
+callable` 25/25 hand 실패.
+
+**본질**: `AbstractedHUNLState.infoset_key`는 `@property` (line
+603-604, `hunl_abstraction.py`). `()` 없이 attribute access. grep
+1회로 잡혔을 fact를 source verification 누락한 채 implementation 진입.
+
+**오류 패턴 6번째 instance** (자산 #22 일관):
+
+| # | Phase | Type |
+|---|---|---|
+| Phase 3 #1 | Phase 3 Day 5 | algorithm transfer |
+| M3.3 #8 | Phase 4 M3.3 | use case transfer |
+| M4.0 #9 | Phase 4 M4.0 | fact (stack depth) transfer |
+| M4.4 #10 | Phase 4 M4.4 | fact (API client_pos) transfer |
+| M4.5.0 #11 | Phase 4 M4.5.0 | process-state heuristic transfer |
+| **M4.5.1 #26** | Phase 4 M4.5.1 | **internal API fact transfer (property vs method)** |
+
+**일반화 (M4.5.1 후)**: cross-context transfer 위험 영역에 **internal
+API surface** 추가. external doc / 외부 fact 뿐 아니라 자체 codebase
+API도 verification 대상. "이 attribute가 method인가 property인가?"는
+grep `def {name}` / `@property` 1회 cost.
+
+**누계: claude 26 / mentor 11.** 운영 변경 후 첫 클코 self-correction
+(mentor #11과 같은 cluster, verification-after-correction 패턴).
+
+#### mentor self-audit #11 — 5% threshold metric mismatch (M4.5.0a closure 시점)
+
+**오류**: M4.5.0 weak suggestion #1 — "spread > 5% audit flag"가
+abstractor 결정성 검증 hook으로 의도. 실측 5-seed에서 모든 round
+7-19% spread → MCCFR external sampling stochasticity가 abstractor
+spread를 압도. 의도 (abstractor 검증) ≠ 실제 측정 (sampling).
+
+**본질**: 통계 영역 measurement priority/granularity 정의 누락. 두
+독립 stochastic source (abstractor seed × MCCFR sampling rng)를 한
+metric으로 측정 → signal interpretation 모호.
+
+**누계 갱신**: mentor 10 → 11. mentor solo 발견 0/11 일관 (자가
+교정 1번째). 운영 변경 정당성 강화.
+
+#### Spec deviation framing (PHASE.md M4.5.1 entry 정직 기록)
+
+Spec literal "1k hand × 5-seed × 5-thread parallel" → executed
+"5-hand smoke decided path B + skipped 1k full". 통계적 evidence가
+robust enough이면 모든 spec step 따를 필요 없음. 자산 #22 lesson
+연장 — verification-after-correction이 새 컨텍스트로 transfer:
+*"spec 따르기"라는 직관도 매 단계 verify 대상*.
+
+#### M4.5.2 Schnizlein 2009 spec lock (next)
+
+**Scope (3-tier, M4.5.2 = tier 1+2 only)**:
+
+| Tier | 내용 | M4.5.2 | Phase 5 |
+|------|------|--------|---------|
+| 1 | Action size translation: opponent raw raise → prob dist over adjacent buckets (Schnizlein Eq. 3 geometric mid-point) | ✓ | — |
+| 2 | State replay dispatch: strategy lookup이 dist 가중 평균 (deterministic 대체) | ✓ | — |
+| 3 | MCCFR train-time integration (re-train 필요) | — | ✓ |
+
+**Wall-clock estimate**: implementation+TDD ~30-60min code, mid-pilot
+A/B (setup 25min × 2 = 50min + hand 5min) ~55min, production 10k
+~120min, audit/commit ~30min. **총 ~4시간 wall (사용자 active ~1.5h
+= 1 세션 + half)**.
+
+**Setup overhead mitigation 검토 (M4.5.2 spec 시점)**:
+- (m1) game setup 결과 disk cache → load
+- (m2) game setup multiprocessing.Pool 분리 (5-thread GIL bound 25min → 5-process 5min)
+
+---
 
 ### Phase 4 M4.5.0a — α + atomic rename, 5/5 success (2026-04-28 새벽)
 

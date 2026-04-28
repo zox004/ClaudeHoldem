@@ -1,0 +1,51 @@
+# @package _global_
+# Phase 4 M4.5.1 — Trained-strategy mini-pilot vs Slumbot.
+#
+# 5-thread × 1k hand × 5-seed parallel. Loads M4.5.0a strategy
+# pickles (5 × ~1.1GB → ~5.5GB RSS) and plays vs slumbot.com to
+# measure trained-strategy divergence rate + decide path A/B/
+# ambiguous.
+#
+# 5-thread max_workers chosen from M4.4 multi-token verification
+# (2-token 0.64s, no rate limit at 1s pacing). hand_sleep_s=1.0
+# matches M4.4 single-thread baseline (effective rate ≈ 5 req/s
+# across 5 threads, M4.4 equivalent total load).
+#
+# Wall-clock estimate: 5000 hand / (5 thread × ~2.81s per hand)
+# = ~17min including Slumbot 1.81s/hand latency + 1s sleep.
+#
+# Overrides:
+#   uv run python -m experiments.phase4_m45_pilot                # full
+#   uv run python -m experiments.phase4_m45_pilot n_hands=10     # smoke
+#   uv run python -m experiments.phase4_m45_pilot seeds=[42]     # single-seed
+#   uv run python -m experiments.phase4_m45_pilot hand_sleep_s=2 # conservative
+
+experiment_name: phase4_m45_pilot
+
+# Strategy artifact dir (M4.5.0a explicit path, claude push-back #3).
+strategy_dir: experiments/outputs/phase4_m45_train_strategies/20260428-012027
+
+# Pilot scope.
+n_hands: 1000
+seeds: [42, 123, 456, 789, 1024]
+
+# Pacing (claude push-back #5: M4.4 single-thread 1s baseline preserved
+# across 5 threads → effective 5 req/s total).
+hand_sleep_s: 1.0
+
+# Game configuration (matches M4.0 baseline + M4.5.0 train).
+n_buckets: 50
+n_trials: 10000
+postflop_mc_trials: 300
+postflop_threshold_sample_size: 10000
+
+# Retry policy (M4.4 default).
+max_retries: 3
+backoff_base: 2.0
+max_backoff: 30.0
+
+hydra:
+  run:
+    dir: experiments/outputs/${experiment_name}/${now:%Y%m%d-%H%M%S}
+  job:
+    chdir: false
